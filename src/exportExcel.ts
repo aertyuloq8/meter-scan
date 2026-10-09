@@ -22,6 +22,8 @@ export type ExportResult = {
     cancelled?: boolean;
     format?: "xlsx" | "csv";
     unsupported?: boolean;
+    summaryText?: string;
+    lineShareUrl?: string;
   };
 };
 
@@ -299,6 +301,31 @@ function buildWorkbook(rows: string[][], stats: string[][] | undefined) {
   return workbook;
 }
 
+function isAppleDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPad|iPhone|iPod|Macintosh/i.test(navigator.userAgent);
+}
+
+export function buildShareSummaryText(fileName: string, recordCount: number, csvRows?: string[][]): string {
+  let text = `【電表資料報表】\n檔案：${fileName}\n筆數：共 ${recordCount} 筆\n匯出時間：${formattedNow()}`;
+  if (csvRows && csvRows.length > 1) {
+    const dataRows = csvRows.slice(1);
+    const previewCount = Math.min(dataRows.length, 6);
+    text += "\n\n📋 紀錄摘要：";
+    for (let i = 0; i < previewCount; i++) {
+      const row = dataRows[i];
+      const isDateFirst = /^\d{4}-\d{2}-\d{2}$/.test(row[0] || "");
+      const serviceNo = isDateFirst ? (row[1] || "(無電號)") : (row[0] || "(無電號)");
+      const meterNo = isDateFirst ? (row[3] || row[2] || "") : (row[2] || row[1] || "");
+      text += `\n${i + 1}. 電號 ${serviceNo} / 表號 ${meterNo}`;
+    }
+    if (dataRows.length > previewCount) {
+      text += `\n...等共 ${dataRows.length} 筆電表資料`;
+    }
+  }
+  return text;
+}
+
 async function writeOrShareWorkbook(
   workbook: XLSX.WorkBook,
   fileName: string,
@@ -313,6 +340,8 @@ async function writeOrShareWorkbook(
   cancelled?: boolean;
   format?: "xlsx" | "csv";
   unsupported?: boolean;
+  summaryText?: string;
+  lineShareUrl?: string;
 }> {
   // 1. 原生 Capacitor App（若打包為 APK）
   if (isNativeApp()) {
@@ -341,7 +370,88 @@ async function writeOrShareWorkbook(
     return { shared: true, downloaded: false, format: "xlsx" };
   }
 
-  // 2. Web 環境（PWA / 瀏覽器）
+  // 模式 C: 系統原生分享 (Web Share API) —— 優先執行，保持瞬態手勢（User Activation）有效！
+  if (mode === "share") {
+    const recordCount = csvRows && csvRows.length > 1 ? csvRows.length - 1 : 0;
+    const textSummary = buildShareSummaryText(fileName, recordCount, csvRows);
+    const lineShareUrl = `https://line.me/R/msg/text/?${encodeURIComponent(textSummary)}`;
+
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      const isApple = isAppleDevice();
+
+      // (A) Apple 裝置（iOS Safari / macOS）：支援原版 .xlsx
+      if (isApple) {
+        const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+        const xlsxMimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        const xlsxBlob = new Blob([arrayBuffer], { type: xlsxMimeType });
+        const xlsxFile = new File([xlsxBlob], fileName, { type: xlsxMimeType });
+
+        if (canShareFile(xlsxFile)) {
+          try {
+            await navigator.share({
+              title: "電表資料",
+              text: `電表資料：${fileName}`,
+              files: [xlsxFile],
+            });
+            return { shared: true, downloaded: false, format: "xlsx", summaryText: textSummary, lineShareUrl };
+          } catch (error) {
+            if (error instanceof Error && error.name === "AbortError") {
+              return { shared: false, downloaded: false, cancelled: true };
+            }
+          }
+        }
+      }
+
+      // (B) Android / Chromium 裝置：FILE_TYPES.md 支援 text/csv（禁止 .xlsx）。
+      // 避免 XLSX.write 耗時消耗點擊授權，直接以純 CSV 瞬間觸發系統原生分享！
+      if (csvRows && csvRows.length > 0) {
+        const csvBlob = buildCsvBlob(csvRows);
+        const safeCsvFileName = fileName.replace(/\.xlsx$/i, ".csv");
+        const csvFile = new File([csvBlob], safeCsvFileName, { type: "text/csv" });
+
+        if (canShareFile(csvFile)) {
+          try {
+            await navigator.share({
+              title: "電表資料",
+              text: `電表資料：${safeCsvFileName}`,
+              files: [csvFile],
+            });
+            return { shared: true, downloaded: false, format: "csv", summaryText: textSummary, lineShareUrl };
+          } catch (error) {
+            if (error instanceof Error && error.name === "AbortError") {
+              return { shared: false, downloaded: false, cancelled: true };
+            }
+          }
+        }
+      }
+
+      // (C) 降級：若檔案拋送受限制，改以摘要文字呼叫原生分享面板（支援 LINE、Gmail）
+      try {
+        await navigator.share({
+          title: "電表資料報表",
+          text: textSummary,
+        });
+        return { shared: true, downloaded: false, format: "csv", summaryText: textSummary, lineShareUrl };
+      } catch (textError) {
+        if (textError instanceof Error && textError.name === "AbortError") {
+          return { shared: false, downloaded: false, cancelled: true };
+        }
+      }
+    }
+
+    // (D) 若瀏覽器環境完全不支援 Web Share API（如 Android WebView、LINE 內建瀏覽器等）：
+    // 回傳 unsupported 與 lineShareUrl，讓前端彈窗直接提供「一鍵分享至 LINE」與「複製內容」
+    return {
+      shared: false,
+      downloaded: false,
+      unsupported: true,
+      format: "xlsx",
+      summaryText: textSummary,
+      lineShareUrl,
+    };
+  }
+
+  // 2. Web 環境（非 share 模式：產生 XLSX）
   const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
   const xlsxMimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   const xlsxBlob = new Blob([arrayBuffer], { type: xlsxMimeType });
@@ -366,70 +476,6 @@ async function writeOrShareWorkbook(
   if (mode === "local" || mode === "download") {
     downloadBlob(xlsxBlob, fileName);
     return { shared: false, downloaded: true, format: "xlsx" };
-  }
-
-  // 模式 C: 系統原生分享 (Web Share API)
-  if (mode === "share") {
-    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-      // 步驟 1: 優先嘗試分享原生 .xlsx（在 Safari / iOS 或支援的系統）
-      const xlsxFile = new File([xlsxBlob], fileName, { type: xlsxMimeType });
-      if (canShareFile(xlsxFile)) {
-        try {
-          await navigator.share({
-            title: "電表資料",
-            text: `電表資料：${fileName}`,
-            files: [xlsxFile],
-          });
-          return { shared: true, downloaded: false, format: "xlsx" };
-        } catch (error) {
-          if (error instanceof Error && error.name === "AbortError") {
-            return { shared: false, downloaded: false, cancelled: true };
-          }
-          console.warn("XLSX 分享失敗，嘗試轉為 CSV 格式分享：", error);
-        }
-      }
-
-      // 步驟 2: Android Chrome 安全白名單支援 text/csv 試算表格式
-      if (csvRows && csvRows.length > 0) {
-        const csvBlob = buildCsvBlob(csvRows);
-        const csvFileName = fileName.replace(/\.xlsx$/i, ".csv");
-        const csvFile = new File([csvBlob], csvFileName, { type: "text/csv" });
-
-        if (canShareFile(csvFile)) {
-          try {
-            await navigator.share({
-              title: "電表資料",
-              text: `電表資料：${csvFileName}`,
-              files: [csvFile],
-            });
-            return { shared: true, downloaded: false, format: "csv" };
-          } catch (error) {
-            if (error instanceof Error && error.name === "AbortError") {
-              return { shared: false, downloaded: false, cancelled: true };
-            }
-            console.warn("CSV 分享失敗，嘗試文字摘要分享：", error);
-          }
-        }
-      }
-
-      // 步驟 3: 若瀏覽器禁止實體檔案拋送，改以文字摘要呼叫分享面板（支援 LINE、Gmail、通訊軟體）
-      const recordCount = csvRows && csvRows.length > 1 ? csvRows.length - 1 : 0;
-      const textSummary = `【電表資料報表】\n檔案名稱：${fileName}\n資料筆數：共 ${recordCount} 筆\n匯出時間：${formattedNow()}`;
-      try {
-        await navigator.share({
-          title: "電表資料報表",
-          text: textSummary,
-        });
-        return { shared: true, downloaded: false, format: "csv" };
-      } catch (textError) {
-        if (textError instanceof Error && textError.name === "AbortError") {
-          return { shared: false, downloaded: false, cancelled: true };
-        }
-      }
-    }
-
-    // 若明確點選「分享」，但環境不支援，不私自下載，回傳 unsupported 由前端明確告知使用者
-    return { shared: false, downloaded: false, unsupported: true, format: "xlsx" };
   }
 
   // 模式 D: 自動（auto）在支援分享環境下嘗試分享

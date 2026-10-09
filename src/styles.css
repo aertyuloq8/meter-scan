@@ -3161,5 +3161,63 @@ select {
   transform: scale(0.98);
 }
 
+.notice-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.notice-modal-action-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.notice-modal-action-btn.primary {
+  background: #0284c7;
+  color: #ffffff;
+  border: none;
+}
+
+.notice-modal-action-btn.primary:hover {
+  background: #0369a1;
+}
+
+.notice-modal-action-btn.line-btn {
+  background: #06c755;
+  color: #ffffff;
+  border: none;
+  font-size: 15px;
+  box-shadow: 0 4px 12px rgba(6, 199, 85, 0.28);
+}
+
+.notice-modal-action-btn.line-btn:hover {
+  background: #05b04c;
+}
+
+.notice-modal-action-btn.secondary {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.notice-modal-action-btn.secondary:hover {
+  background: #e2e8f0;
+}
+
+.notice-modal-action-btn:active {
+  transform: scale(0.98);
+}
+
 
 

@@ -91,6 +91,13 @@ type ExportTarget =
   | { type: "all" }
   | { type: "backup" };
 
+export interface NoticeModalAction {
+  label: string;
+  onClick: () => void;
+  primary?: boolean;
+  styleClass?: string;
+}
+
 interface NoticeModalData {
   type?: "success" | "info" | "warning" | "error";
   title: string;
@@ -98,6 +105,7 @@ interface NoticeModalData {
   details?: Array<{ label: string; value: string }>;
   confirmText?: string;
   onConfirm?: () => void;
+  actions?: NoticeModalAction[];
 }
 
 export function App() {
@@ -1577,14 +1585,59 @@ export function App() {
             ],
           });
         } else if (result.delivery?.unsupported) {
-          setMessage(`目前瀏覽器不支援直接呼叫分享面板，請改用儲存至雲端或下載（${result.recordCount} 筆）`);
+          setMessage(`目前瀏覽器不支援原生分享面板，提供快捷傳送 LINE 或下載（${result.recordCount} 筆）`);
           setNoticeModal({
             type: "warning",
-            title: "瀏覽器不支援原生分享",
-            message: "目前使用的瀏覽器環境不支援直接喚醒手機系統分享選單。\n\n💡 建議：\n1. 請改用手機 Chrome 或 Safari 開啟本系統。\n2. 或在匯出選項中點選「儲存至 Google 雲端硬碟」或「直接下載至本機」。",
+            title: "瀏覽器不支援系統原生分享",
+            message: "您目前使用的環境（如 LINE 內建瀏覽器或特定手機 WebView）限制調用系統原生分享面板。\n\n請選擇以下快捷方式傳送或保存資料：",
             details: [
+              { label: "報表日期", value: target.date },
               { label: "檔案名稱", value: result.fileName },
               { label: "資料筆數", value: `${result.recordCount} 筆` },
+            ],
+            confirmText: "關閉視窗",
+            actions: [
+              ...(result.delivery?.lineShareUrl
+                ? [
+                    {
+                      label: "🟢 直接傳送至 LINE",
+                      primary: true,
+                      styleClass: "line-btn",
+                      onClick: () => {
+                        window.open(result.delivery?.lineShareUrl, "_blank");
+                      },
+                    },
+                  ]
+                : []),
+              ...(result.delivery?.summaryText
+                ? [
+                    {
+                      label: "📋 複製報表文字內容",
+                      onClick: async () => {
+                        try {
+                          await navigator.clipboard.writeText(result.delivery!.summaryText!);
+                          setMessage("已複製報表摘要至剪貼簿！可直接貼至任何通訊軟體");
+                        } catch {
+                          setMessage("複製失敗，請手動複製");
+                        }
+                      },
+                    },
+                  ]
+                : []),
+              {
+                label: "📥 直接下載 Excel 檔至手機",
+                onClick: () => {
+                  setNoticeModal(null);
+                  void executeExport(target, "download");
+                },
+              },
+              {
+                label: "☁️ 儲存至 Google 雲端硬碟",
+                onClick: () => {
+                  setNoticeModal(null);
+                  void executeExport(target, "drive");
+                },
+              },
             ],
           });
         } else {
@@ -1653,14 +1706,59 @@ export function App() {
             ],
           });
         } else if (result.delivery?.unsupported) {
-          setMessage(`目前瀏覽器不支援直接呼叫分享面板，請改用儲存至雲端或下載（共 ${result.recordCount} 筆）`);
+          setMessage(`目前瀏覽器不支援原生分享面板，提供快捷傳送 LINE 或下載（共 ${result.recordCount} 筆）`);
           setNoticeModal({
             type: "warning",
-            title: "瀏覽器不支援原生分享",
-            message: "目前使用的瀏覽器環境不支援直接喚醒手機系統分享選單。\n\n💡 建議：\n1. 請改用手機 Chrome 或 Safari 開啟本系統。\n2. 或在匯出選項中點選「儲存至 Google 雲端硬碟」或「直接下載至本機」。",
+            title: "瀏覽器不支援系統原生分享",
+            message: "您目前使用的環境（如 LINE 內建瀏覽器或特定手機 WebView）限制調用系統原生分享面板。\n\n請選擇以下快捷方式傳送或保存資料：",
             details: [
+              { label: "匯出範圍", value: `全部歷史紀錄（${folderDates.length} 個工作日）` },
               { label: "檔案名稱", value: result.fileName },
               { label: "總筆數", value: `${result.recordCount} 筆` },
+            ],
+            confirmText: "關閉視窗",
+            actions: [
+              ...(result.delivery?.lineShareUrl
+                ? [
+                    {
+                      label: "🟢 直接傳送至 LINE",
+                      primary: true,
+                      styleClass: "line-btn",
+                      onClick: () => {
+                        window.open(result.delivery?.lineShareUrl, "_blank");
+                      },
+                    },
+                  ]
+                : []),
+              ...(result.delivery?.summaryText
+                ? [
+                    {
+                      label: "📋 複製報表文字內容",
+                      onClick: async () => {
+                        try {
+                          await navigator.clipboard.writeText(result.delivery!.summaryText!);
+                          setMessage("已複製報表摘要至剪貼簿！可直接貼至任何通訊軟體");
+                        } catch {
+                          setMessage("複製失敗，請手動複製");
+                        }
+                      },
+                    },
+                  ]
+                : []),
+              {
+                label: "📥 直接下載 Excel 檔至手機",
+                onClick: () => {
+                  setNoticeModal(null);
+                  void executeExport(target, "download");
+                },
+              },
+              {
+                label: "☁️ 儲存至 Google 雲端硬碟",
+                onClick: () => {
+                  setNoticeModal(null);
+                  void executeExport(target, "drive");
+                },
+              },
             ],
           });
         } else {
@@ -1715,13 +1813,57 @@ export function App() {
             ],
           });
         } else if (result.unsupported) {
-          setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您下載備份檔（${result.fileName}）`);
+          setMessage(`目前瀏覽器不支援原生分享面板，提供快捷傳送 LINE 或下載備份（${result.fileName}）`);
           setNoticeModal({
             type: "warning",
-            title: "瀏覽器不支援原生分享",
-            message: "目前使用的瀏覽器環境不支援直接喚醒手機系統分享選單。\n\n💡 建議：\n1. 請改用手機 Chrome 或 Safari 開啟本系統。\n2. 或在匯出選項中點選「儲存至 Google 雲端硬碟」或「直接下載至本機」。",
+            title: "瀏覽器不支援系統原生分享",
+            message: "您目前使用的環境（如 LINE 內建瀏覽器或特定手機 WebView）限制調用系統原生分享面板。\n\n請選擇以下快捷方式傳送或保存備份：",
             details: [
               { label: "備份檔名", value: result.fileName },
+            ],
+            confirmText: "關閉視窗",
+            actions: [
+              ...(result.lineShareUrl
+                ? [
+                    {
+                      label: "🟢 直接傳送至 LINE",
+                      primary: true,
+                      styleClass: "line-btn",
+                      onClick: () => {
+                        window.open(result.lineShareUrl, "_blank");
+                      },
+                    },
+                  ]
+                : []),
+              ...(result.summaryText
+                ? [
+                    {
+                      label: "📋 複製備份摘要內容",
+                      onClick: async () => {
+                        try {
+                          await navigator.clipboard.writeText(result.summaryText!);
+                          setMessage("已複製備份摘要至剪貼簿！");
+                        } catch {
+                          setMessage("複製失敗，請手動複製");
+                        }
+                      },
+                    },
+                  ]
+                : []),
+              {
+                label: "📥 下載備份檔 (.json)",
+                onClick: () => {
+                  setNoticeModal(null);
+                  void executeExport(target, "download");
+                },
+              },
+              {
+                label: "☁️ 備份至 Google 雲端硬碟",
+                onClick: () => {
+                  setNoticeModal(null);
+                  void executeExport(target, "drive");
+                },
+              },
             ],
           });
         } else {
@@ -2675,7 +2817,7 @@ export function App() {
           <div className="list-tab-view">
             <header className="app-header compact">
               <div className="app-header-left">
-                <h1 className="header-title">巡檢電表清單</h1>
+                <h1 className="header-title">電表清單</h1>
               </div>
               <button
                 className="secondary-button compact"
@@ -3874,6 +4016,23 @@ export function App() {
                       <span className="notice-modal-detail-label">{d.label}</span>
                       <span className="notice-modal-detail-val">{d.value}</span>
                     </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {noticeModal.actions && noticeModal.actions.length > 0 ? (
+                <div className="notice-modal-actions">
+                  {noticeModal.actions.map((act, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className={`notice-modal-action-btn ${act.styleClass ?? (act.primary ? "primary" : "secondary")}`}
+                      onClick={() => {
+                        act.onClick();
+                      }}
+                    >
+                      {act.label}
+                    </button>
                   ))}
                 </div>
               ) : null}

@@ -271,6 +271,8 @@ export type BackupExportResult = {
   uploadedToDrive?: boolean;
   cancelled?: boolean;
   unsupported?: boolean;
+  summaryText?: string;
+  lineShareUrl?: string;
 };
 
 function canShareFile(file: File): boolean {
@@ -354,28 +356,18 @@ export async function exportBackup(
     return { fileName, shared: false, downloaded: true };
   }
 
-  // 模式 C: 系統原生分享 (Web Share API)
+  // 模式 C: 系統原生分享 (Web Share API) —— 優先執行，保持瞬態手勢（User Activation）有效！
   if (mode === "share") {
-    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-      // 步驟 1: 嘗試直接分享 .json
-      const jsonFile = new File([blob], fileName, { type: mimeType });
-      if (canShareFile(jsonFile)) {
-        try {
-          await navigator.share({
-            title: "電表資料備份",
-            text: `電表資料備份：${fileName}`,
-            files: [jsonFile],
-          });
-          return { fileName, shared: true, downloaded: false };
-        } catch (error) {
-          if (error instanceof Error && error.name === "AbortError") {
-            return { fileName, shared: false, downloaded: false, cancelled: true };
-          }
-          console.warn("JSON 格式備份分享失敗：", error);
-        }
-      }
+    const totalCount = Object.values(data.folders).reduce(
+      (sum, folder) => sum + folder.records.length,
+      0,
+    );
+    const dateCount = Object.keys(data.folders).length;
+    const textSummary = `【電表系統資料庫備份】\n檔案名稱：${fileName}\n涵蓋日期：共 ${dateCount} 個工作日\n電表總計：共 ${totalCount} 筆\n備份時間：${new Date().toLocaleString("zh-TW")}`;
+    const lineShareUrl = `https://line.me/R/msg/text/?${encodeURIComponent(textSummary)}`;
 
-      // 步驟 2: Android Chrome 阻擋 .json 檔案類型，但白名單允許 .txt 格式
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      // 步驟 1: Android Chrome 阻擋 .json 檔案類型，但安全白名單允許 .txt 格式
       const txtFileName = `電表資料備份_${timestampForName()}.txt`;
       const txtFile = new File([blob], txtFileName, { type: "text/plain" });
       if (canShareFile(txtFile)) {
@@ -385,27 +377,38 @@ export async function exportBackup(
             text: `電表資料備份：${txtFileName}`,
             files: [txtFile],
           });
-          return { fileName: txtFileName, shared: true, downloaded: false };
+          return { fileName: txtFileName, shared: true, downloaded: false, summaryText: textSummary, lineShareUrl };
         } catch (error) {
           if (error instanceof Error && error.name === "AbortError") {
             return { fileName: txtFileName, shared: false, downloaded: false, cancelled: true };
           }
-          console.warn("TXT 格式備份分享失敗，嘗試文字摘要分享：", error);
         }
       }
 
-      // 步驟 3: 若瀏覽器禁止實體檔案拋送，改以文字摘要呼叫分享面板
-      const totalCount = Object.values(data.folders).reduce(
-        (sum, folder) => sum + folder.records.length,
-        0,
-      );
-      const textSummary = `【電表系統資料庫備份】\n檔案名稱：${fileName}\n涵蓋日期：共 ${Object.keys(data.folders).length} 個\n電表總計：共 ${totalCount} 筆`;
+      // 步驟 2: 嘗試直接分享 .json (iOS Safari / 支援的系統)
+      const jsonFile = new File([blob], fileName, { type: mimeType });
+      if (canShareFile(jsonFile)) {
+        try {
+          await navigator.share({
+            title: "電表資料備份",
+            text: `電表資料備份：${fileName}`,
+            files: [jsonFile],
+          });
+          return { fileName, shared: true, downloaded: false, summaryText: textSummary, lineShareUrl };
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") {
+            return { fileName, shared: false, downloaded: false, cancelled: true };
+          }
+        }
+      }
+
+      // 步驟 3: 若瀏覽器禁止實體檔案拋送，改以文字摘要呼叫分享面板（支援 LINE、Gmail）
       try {
         await navigator.share({
           title: "電表系統資料庫備份",
           text: textSummary,
         });
-        return { fileName, shared: true, downloaded: false };
+        return { fileName, shared: true, downloaded: false, summaryText: textSummary, lineShareUrl };
       } catch (textError) {
         if (textError instanceof Error && textError.name === "AbortError") {
           return { fileName, shared: false, downloaded: false, cancelled: true };
@@ -413,7 +416,15 @@ export async function exportBackup(
       }
     }
 
-    return { fileName, shared: false, downloaded: false, unsupported: true };
+    // 若瀏覽器完全不支援 Web Share API，回傳 unsupported 與 LINE 連結及摘要
+    return {
+      fileName,
+      shared: false,
+      downloaded: false,
+      unsupported: true,
+      summaryText: textSummary,
+      lineShareUrl,
+    };
   }
 
   // 模式 D: 自動（auto）在支援分享環境下嘗試分享
