@@ -1,7 +1,7 @@
 {
-  "name": "app",
+  "name": "meter-scan-web",
   "version": "2.4.3",
-  "description": "",
+  "description": "台電電表資料掃描系統 (Web PWA)",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "dev:https": "vite --host 0.0.0.0 --mode https",
@@ -9,11 +9,6 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "android:add": "cap add android",
-    "android:sync": "npm run build && cap sync android",
-    "android:build": "npm run android:sync && powershell -Command \"Set-Location android; .\\gradlew assembleDebug; Set-Location ..\"",
-    "build:apk": "npm run android:sync && powershell -Command \"Set-Location android; .\\gradlew assembleDebug; Set-Location ..\"",
-    "android:open": "cap open android",
     "preview": "vite preview --host 0.0.0.0"
   },
   "keywords": [],

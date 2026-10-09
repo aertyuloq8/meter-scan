@@ -1,8 +1,0 @@
-{
-  "appId": "com.meterscan.app",
-  "appName": "電表資料掃描",
-  "webDir": "dist",
-  "server": {
-    "androidScheme": "https"
-  }
-}
