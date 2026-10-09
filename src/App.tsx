@@ -48,6 +48,7 @@ import {
 } from "./exportExcel";
 import {
   clearDriveAccessToken,
+  getDriveAccessToken,
   handleDriveOAuthRedirect,
   listDriveBackups,
   downloadDriveFile,
@@ -2165,7 +2166,15 @@ export function App() {
         });
       }
       setDriveProgress({ percent: 100, text: "刪除完成" });
-      setDriveModal(null);
+
+      // 即時樂觀更新：立即從目前視窗清單移除已刪除的檔案，避免殘留
+      const remainingFiles = driveModal.files.filter((f) => !driveModal.selectedIds.includes(f.id));
+      if (remainingFiles.length > 0) {
+        setDriveModal({ ...driveModal, files: remainingFiles, selectedIds: [] });
+      } else {
+        setDriveModal(null);
+      }
+
       setStatus("done");
       setMessage(`✅ 已成功從 Google 雲端硬碟刪除 ${deleted} 個備份檔案`);
       setNoticeModal({
@@ -2175,6 +2184,7 @@ export function App() {
         details: [
           { label: "已刪除數量", value: `${deleted} 個檔案` },
           { label: "操作目標", value: "個人 Google 雲端硬碟" },
+          { label: "剩餘雲端備份", value: `${remainingFiles.length} 個檔案` },
           { label: "本機資料", value: "安全保留未變動" },
         ],
       });
@@ -2190,6 +2200,45 @@ export function App() {
     } finally {
       setIsDriveBusy(false);
       setTimeout(() => setDriveProgress(null), 1500);
+    }
+  }
+
+  async function handleRefreshDriveList() {
+    if (!driveModal) return;
+    setIsDriveBusy(true);
+    setDriveProgress({ percent: 30, text: "正在即時更新雲端檔案清單…" });
+    try {
+      const files = await listDriveBackups("電表");
+      setDriveModal((prev) => (prev ? { ...prev, files, selectedIds: [] } : null));
+      setMessage(`已更新 Google 雲端硬碟檔案清單（共 ${files.length} 個）`);
+    } catch (err) {
+      console.warn("重整清單失敗", err);
+    } finally {
+      setIsDriveBusy(false);
+      setDriveProgress(null);
+    }
+  }
+
+  async function handleSwitchDriveAccount() {
+    if (!driveModal) return;
+    clearDriveAccessToken();
+    setIsDriveBusy(true);
+    setDriveProgress({ percent: 20, text: "正在選取 Google 帳號…" });
+    try {
+      await getDriveAccessToken(undefined, false);
+      const files = await listDriveBackups("電表");
+      setDriveModal((prev) => (prev ? { ...prev, files, selectedIds: [] } : null));
+      setMessage(`已切換 Google 帳號並載入清單（共 ${files.length} 個）`);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "切換帳號失敗";
+      if (errMsg.includes("已取消") || errMsg.includes("closed")) {
+        setMessage("已取消帳號選取");
+      } else {
+        setMessage(errMsg);
+      }
+    } finally {
+      setIsDriveBusy(false);
+      setDriveProgress(null);
     }
   }
 
@@ -3949,15 +3998,36 @@ export function App() {
                       : "請勾選要自雲端硬碟刪除的備份檔案（可多選）："}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  className="dialog-close-btn"
-                  title="關閉"
-                  disabled={isDriveBusy}
-                  onClick={() => setDriveModal(null)}
-                >
-                  <X size={20} />
-                </button>
+                <div className="dialog-header-actions">
+                  <button
+                    type="button"
+                    className="dialog-action-icon-btn"
+                    title="強制重新整理雲端清單"
+                    disabled={isDriveBusy}
+                    onClick={() => void handleRefreshDriveList()}
+                  >
+                    <RefreshCw size={14} className={isDriveBusy ? "spin" : ""} />
+                    <span>重整</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="dialog-action-icon-btn"
+                    title="更換其他 Google 帳號"
+                    disabled={isDriveBusy}
+                    onClick={() => void handleSwitchDriveAccount()}
+                  >
+                    <span>換帳號</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="dialog-close-btn"
+                    title="關閉"
+                    disabled={isDriveBusy}
+                    onClick={() => setDriveModal(null)}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
               {driveProgress ? (
@@ -3976,39 +4046,64 @@ export function App() {
               ) : null}
 
               <div className="drive-file-list">
-                {driveModal.files.map((file) => {
-                  const isChecked = driveModal.selectedIds.includes(file.id);
-                  return (
-                    <label key={file.id} className="drive-file-item">
-                      <input
-                        type={driveModal.type === "restore" ? "radio" : "checkbox"}
-                        name="driveBackupItem"
-                        className="drive-file-radio"
-                        checked={isChecked}
-                        onChange={() => {
-                          if (driveModal.type === "restore") {
-                            setDriveModal({ ...driveModal, selectedIds: [file.id] });
-                          } else {
-                            const next = isChecked
-                              ? driveModal.selectedIds.filter((id) => id !== file.id)
-                              : [...driveModal.selectedIds, file.id];
-                            setDriveModal({ ...driveModal, selectedIds: next });
-                          }
-                        }}
-                      />
-                      <div className="drive-file-details">
-                        <span className="drive-file-name">{file.name}</span>
-                        <span className="drive-file-meta">
-                          {file.createdTime ? new Date(file.createdTime).toLocaleString("zh-TW") : ""}
-                          {file.size ? ` · ${(file.size / 1024).toFixed(1)} KB` : ""}
-                        </span>
-                        {file.description ? (
-                          <span className="drive-file-desc">📋 {file.description}</span>
-                        ) : null}
-                      </div>
-                    </label>
-                  );
-                })}
+                {driveModal.files.length === 0 ? (
+                  <div className="drive-empty-notice">
+                    <p>目前在此 Google 帳號中找不到電表備份檔案。</p>
+                    <div className="drive-empty-actions">
+                      <button
+                        type="button"
+                        className="secondary-button compact"
+                        disabled={isDriveBusy}
+                        onClick={() => void handleRefreshDriveList()}
+                      >
+                        <RefreshCw size={14} className={isDriveBusy ? "spin" : ""} />
+                        <span>重新整理</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button compact"
+                        disabled={isDriveBusy}
+                        onClick={() => void handleSwitchDriveAccount()}
+                      >
+                        切換其他 Google 帳號
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  driveModal.files.map((file) => {
+                    const isChecked = driveModal.selectedIds.includes(file.id);
+                    return (
+                      <label key={file.id} className="drive-file-item">
+                        <input
+                          type={driveModal.type === "restore" ? "radio" : "checkbox"}
+                          name="driveBackupItem"
+                          className="drive-file-radio"
+                          checked={isChecked}
+                          onChange={() => {
+                            if (driveModal.type === "restore") {
+                              setDriveModal({ ...driveModal, selectedIds: [file.id] });
+                            } else {
+                              const next = isChecked
+                                ? driveModal.selectedIds.filter((id) => id !== file.id)
+                                : [...driveModal.selectedIds, file.id];
+                              setDriveModal({ ...driveModal, selectedIds: next });
+                            }
+                          }}
+                        />
+                        <div className="drive-file-details">
+                          <span className="drive-file-name">{file.name}</span>
+                          <span className="drive-file-meta">
+                            {file.createdTime ? new Date(file.createdTime).toLocaleString("zh-TW") : ""}
+                            {file.size ? ` · ${(file.size / 1024).toFixed(1)} KB` : ""}
+                          </span>
+                          {file.description ? (
+                            <span className="drive-file-desc">📋 {file.description}</span>
+                          ) : null}
+                        </div>
+                      </label>
+                    );
+                  })
+                )}
               </div>
 
               <div className="export-dialog-footer" style={{ gap: "10px" }}>

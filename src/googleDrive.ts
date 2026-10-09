@@ -230,9 +230,13 @@ export async function driveFetch(
 ): Promise<Response> {
   const token = await getDriveAccessToken(undefined, reuseExisting);
   const resp = await fetch(url, {
+    cache: "no-store",
     ...options,
     headers: {
       Authorization: `Bearer ${token}`,
+      "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
       ...(options.headers || {}),
     },
   });
@@ -254,6 +258,20 @@ export async function driveFetch(
 export interface DriveUploadedFile {
   id: string;
   name: string;
+}
+
+// 即時同步快取：徹底解決 Google Drive 搜尋索引（Eventual Consistency）延遲與瀏覽器快取問題
+const recentUploadedFiles = new Map<string, DriveFileInfo>();
+const recentDeletedFileIds = new Set<string>();
+
+export function recordRecentDriveUpload(file: DriveFileInfo): void {
+  recentDeletedFileIds.delete(file.id);
+  recentUploadedFiles.set(file.id, file);
+}
+
+export function recordRecentDriveDelete(fileId: string): void {
+  recentUploadedFiles.delete(fileId);
+  recentDeletedFileIds.add(fileId);
 }
 
 /**
@@ -295,7 +313,17 @@ export async function uploadFileToDrive(
       put.onload = () => {
         if (put.status >= 200 && put.status < 300) {
           try {
-            resolve(JSON.parse(put.responseText));
+            const parsed = JSON.parse(put.responseText);
+            if (parsed.id) {
+              recordRecentDriveUpload({
+                id: parsed.id,
+                name: parsed.name || name,
+                size: blob.size,
+                createdTime: new Date().toISOString(),
+                description,
+              });
+            }
+            resolve(parsed);
           } catch {
             resolve({ id: "", name });
           }
@@ -330,11 +358,31 @@ export interface DriveFileInfo {
  */
 export async function listDriveBackups(keyword = "電表"): Promise<DriveFileInfo[]> {
   const query = encodeURIComponent(`name contains '${keyword}' and trashed = false`);
+  const nonce = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const resp = await driveFetch(
-    `https://www.googleapis.com/drive/v3/files?q=${query}&orderBy=createdTime desc&pageSize=30&fields=files(id,name,size,createdTime,description)`,
+    `https://www.googleapis.com/drive/v3/files?q=${query}&spaces=drive&orderBy=createdTime desc&pageSize=50&fields=files(id,name,size,createdTime,description)&_t=${nonce}`,
+    {
+      cache: "no-store",
+    },
+    true,
   );
   const data = (await resp.json()) as { files?: DriveFileInfo[] };
-  return data.files || [];
+  let remoteFiles = data.files || [];
+
+  // 1. 濾除剛被刪除但 Google 搜尋索引尚未移除的幽靈檔案
+  remoteFiles = remoteFiles.filter((f) => !recentDeletedFileIds.has(f.id));
+
+  // 2. 自動合併剛剛上傳但 Google 搜尋索引尚未建置完成的最新檔案
+  const remoteIds = new Set(remoteFiles.map((f) => f.id));
+  const missingRecents: DriveFileInfo[] = [];
+  for (const [id, file] of recentUploadedFiles.entries()) {
+    if (!remoteIds.has(id) && !recentDeletedFileIds.has(id)) {
+      missingRecents.push(file);
+    }
+  }
+
+  // 最新檔案置於清單頂端
+  return [...missingRecents, ...remoteFiles];
 }
 
 /**
@@ -371,10 +419,20 @@ export async function downloadDriveFile(
 }
 
 /**
- * 從 Google 雲端硬碟刪除檔案
+ * 從 Google 雲端硬碟刪除檔案（具備 404 容錯保護）
  */
 export async function deleteDriveFile(fileId: string): Promise<void> {
-  await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
-    method: "DELETE",
-  });
+  recordRecentDriveDelete(fileId);
+  try {
+    await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("404") || msg.includes("notFound") || msg.includes("File not found")) {
+      console.warn(`檔案 ${fileId} 在雲端已不存在 (404)，視為已清理成功`);
+      return;
+    }
+    throw err;
+  }
 }

@@ -3090,6 +3090,59 @@ select {
   cursor: not-allowed;
 }
 
+.dialog-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dialog-action-icon-btn {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dialog-action-icon-btn:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.dialog-action-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.drive-empty-notice {
+  padding: 24px 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.drive-empty-notice p {
+  margin: 0;
+}
+
+.drive-empty-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 /* ================= 提示與反饋彈窗 (Notice Modal) ================= */
 
 .notice-modal-card {
