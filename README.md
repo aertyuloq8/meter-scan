@@ -1,13 +1,16 @@
-# 台電電表資料掃描系統 (Meter Scan PWA)
+# 台電電表資料掃描系統 (Web PWA 專案)
 
-台電現場作業專用的高效電表 QRCode 雙碼自動比對、電號貼紙掃描與 Excel 匯出網頁應用程式 (PWA)。
+本專案專屬於 **純 Web 網頁應用程式 (PWA)** 與 **GitHub Pages** 自動化部署。
+
+> 📱 **Android 原生 APK 專案位置**：`C:\Users\Administrator\Documents\app`  
+> 🔗 **線上網址 (GitHub Pages)**：`https://aertyuloq8.github.io/meter-scan/`
 
 ---
 
 ## 🌟 核心特色
 
 1. **極致 QR Code 辨識引擎**：
-   - **硬體加速 ML Kit (Shape Detection API)**：在 Android Chrome / Edge 等現代行動瀏覽器上自動啟動 GPU/DSP 硬體加速，幀率高達 60 FPS。
+   - **硬體加速 ML Kit (Shape Detection API)**：在 Android Chrome / Edge 等行動瀏覽器上自動啟動 GPU/DSP 硬體加速，幀率高達 60 FPS。
    - **單幀雙碼並行比對**：鏡頭同時涵蓋電表 1/2 與 2/2 雙 QR 時，一幀即可直接完成配對，無延遲、零頓挫。
    - **相機光學約束優化**：自動啟用連續自動對焦（Continuous Auto-Focus）、高解析度（1080p）採樣與手電筒（Torch）補光控制。
    - **智慧 Fallback 機制**：Safari、Firefox 或不支援 BarcodeDetector 的環境自動切換至高精度 ZXing 引擎。
@@ -29,19 +32,9 @@
 
 ---
 
-## 🚀 部署與使用
+## 🚀 本地開發與建置
 
-### 線上體驗 (GitHub Pages)
-直接開啟手機瀏覽器訪問：
-`https://aertyuloq8.github.io/meter-scan/`
-
-> **提示**：在手機 Chrome 或 Safari 點選瀏覽器選單中的 **「加到主畫面」**，即可像原生 App 一樣全螢幕流暢使用！
-
-### 開發與本地建置
 ```bash
-# 安裝相依套件
-npm install
-
 # 啟動本地開發伺服器
 npm run dev
 
@@ -50,4 +43,7 @@ npm run test
 
 # 生產環境建置
 npm run build
+
+# 部署說明：推送至 main 分支時，GitHub Actions 會自動編譯並發布至 GitHub Pages
+git push origin main
 ```
