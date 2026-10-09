@@ -1,0 +1,48 @@
+{
+  "name": "app",
+  "version": "2.4.3",
+  "description": "",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "dev:https": "vite --host 0.0.0.0 --mode https",
+    "build": "tsc && vite build",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "android:add": "cap add android",
+    "android:sync": "npm run build && cap sync android",
+    "android:build": "npm run android:sync && powershell -Command \"Set-Location android; .\\gradlew assembleDebug; Set-Location ..\"",
+    "build:apk": "npm run android:sync && powershell -Command \"Set-Location android; .\\gradlew assembleDebug; Set-Location ..\"",
+    "android:open": "cap open android",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "^8.1.0",
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/share": "^8.0.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@zxing/browser": "^0.2.1",
+    "lucide-react": "^1.24.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.4",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "happy-dom": "^20.14.5",
+    "playwright": "^1.61.1",
+    "vitest": "^4.1.10"
+  }
+}

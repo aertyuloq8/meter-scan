@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Production build
+dist/
+dist-ssr/
+
+# Android build outputs & temporary files
+android/.gradle/
+android/build/
+android/app/build/
+*.apk
+*.aab
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Large media & local test assets
+*.mp4
+Photos-1-001/
+field-test/
+*_bak_*
+

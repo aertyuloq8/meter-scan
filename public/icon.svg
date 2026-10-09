@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1f6f52"/>
+  <rect x="118" y="92" width="276" height="328" rx="36" fill="#f7fbf3"/>
+  <rect x="154" y="130" width="204" height="74" rx="14" fill="#17201a"/>
+  <g fill="#1f6f52">
+    <rect x="156" y="248" width="54" height="54" rx="8"/>
+    <rect x="230" y="248" width="54" height="54" rx="8"/>
+    <rect x="304" y="248" width="54" height="54" rx="8"/>
+    <rect x="156" y="322" width="54" height="54" rx="8"/>
+    <rect x="230" y="322" width="128" height="54" rx="8"/>
+  </g>
+  <text x="256" y="181" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#fff">QR</text>
+</svg>

@@ -1,0 +1,19 @@
+{
+  "name": "電表資料掃描",
+  "short_name": "電表掃描",
+  "description": "連續掃描電表 QRCode、自動比對雙QR、電號貼紙並匯出 Excel。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#edf1ec",
+  "theme_color": "#1f6f52",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
