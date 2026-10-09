@@ -5,17 +5,20 @@ import { Share } from "@capacitor/share";
 import type { MeterRecord, StoredFolder } from "./types";
 import { formatFullServiceNumber11, normalizeServiceNumberTo8Digits } from "./ocr";
 
+import { uploadFileToDrive } from "./googleDrive";
+
 const headers = ["電號", "型式", "表號", "製造日期", "檢驗號碼", "檢定期限", "匯出時間"] as const;
 
-export type ExportDeliveryMode = "share" | "download" | "auto";
+export type ExportDeliveryMode = "local" | "drive" | "both" | "share" | "download" | "auto";
 
 export type ExportResult = {
   fileName: string;
   recordCount: number;
   incompleteCount: number;
   delivery?: {
-    shared: boolean;
-    downloaded: boolean;
+    shared?: boolean;
+    downloaded?: boolean;
+    uploadedToDrive?: boolean;
     cancelled?: boolean;
     format?: "xlsx" | "csv";
     unsupported?: boolean;
@@ -66,6 +69,7 @@ export async function exportRecords(
   folderDate: string,
   districtCode = "10",
   mode: ExportDeliveryMode = "auto",
+  onProgress?: (percent: number) => void,
 ): Promise<ExportResult> {
   const exportTime = formattedNow();
   const rows: string[][] = records.map((record) => [
@@ -81,7 +85,14 @@ export async function exportRecords(
   const fileName = `電表資料_${folderDate.replaceAll("-", "")}.xlsx`;
   const workbook = buildWorkbook([headers.slice(), ...rows], statsSheet(folderDate, records));
   const csvRows = [headers.slice(), ...rows];
-  const delivery = await writeOrShareWorkbook(workbook, fileName, mode, csvRows);
+  const delivery = await writeOrShareWorkbook(
+    workbook,
+    fileName,
+    mode,
+    csvRows,
+    `電表報表 · 日期：${folderDate} · 筆數：${records.length}筆`,
+    onProgress,
+  );
 
   return {
     fileName,
@@ -96,6 +107,7 @@ export async function exportAllDates(
   preferredOrder: string[],
   districtCode = "10",
   mode: ExportDeliveryMode = "auto",
+  onProgress?: (percent: number) => void,
 ): Promise<ExportResult> {
   const exportTime = formattedNow();
   const dates = preferredOrder.filter((date) => (folders[date] ?? []).length > 0);
@@ -124,7 +136,14 @@ export async function exportAllDates(
   const fileName = `電表資料全部_${exportTime.replace(/[/:]/g, "")}.xlsx`;
   const workbook = buildWorkbook([allHeaders.slice(), ...rows], undefined);
   const csvRows = [allHeaders.slice(), ...rows];
-  const delivery = await writeOrShareWorkbook(workbook, fileName, mode, csvRows);
+  const delivery = await writeOrShareWorkbook(
+    workbook,
+    fileName,
+    mode,
+    csvRows,
+    `電表全部歷史報表 · 總筆數：${rows.length}筆`,
+    onProgress,
+  );
 
   return {
     fileName,
@@ -282,9 +301,12 @@ async function writeOrShareWorkbook(
   fileName: string,
   mode: ExportDeliveryMode = "auto",
   csvRows?: string[][],
+  description?: string,
+  onProgress?: (percent: number) => void,
 ): Promise<{
-  shared: boolean;
-  downloaded: boolean;
+  shared?: boolean;
+  downloaded?: boolean;
+  uploadedToDrive?: boolean;
   cancelled?: boolean;
   format?: "xlsx" | "csv";
   unsupported?: boolean;
@@ -298,7 +320,7 @@ async function writeOrShareWorkbook(
       directory: Directory.Cache,
     });
 
-    if (mode === "download") {
+    if (mode === "download" || mode === "local") {
       await Filesystem.writeFile({
         path: fileName,
         data: base64,
@@ -321,10 +343,33 @@ async function writeOrShareWorkbook(
   const xlsxMimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   const xlsxBlob = new Blob([arrayBuffer], { type: xlsxMimeType });
 
+  // 模式 A: 上傳至 Google Drive (個人雲端硬碟) 或本機與雲端皆存
+  if (mode === "drive" || mode === "both") {
+    await uploadFileToDrive(
+      xlsxBlob,
+      fileName,
+      xlsxMimeType,
+      description || fileName,
+      onProgress,
+    );
+    if (mode === "both") {
+      downloadBlob(xlsxBlob, fileName);
+      return { shared: false, downloaded: true, uploadedToDrive: true, format: "xlsx" };
+    }
+    return { shared: false, downloaded: false, uploadedToDrive: true, format: "xlsx" };
+  }
+
+  // 模式 B: 明確本地下載
+  if (mode === "local" || mode === "download") {
+    downloadBlob(xlsxBlob, fileName);
+    return { shared: false, downloaded: true, format: "xlsx" };
+  }
+
+  // 模式 C: 系統原生分享 (Web Share API)
   const shouldShare = mode === "share" || (mode === "auto" && canBrowserShareFiles());
 
   if (shouldShare) {
-    // 步驟 A: 優先嘗試分享原生 .xlsx（在 Safari / iOS 或支援的系統）
+    // 步驟 1: 優先嘗試分享原生 .xlsx（在 Safari / iOS 或支援的系統）
     const xlsxFile = new File([xlsxBlob], fileName, { type: xlsxMimeType });
     if (canShareFile(xlsxFile)) {
       try {
@@ -342,8 +387,7 @@ async function writeOrShareWorkbook(
       }
     }
 
-    // 步驟 B: Android Chrome 安全限制阻擋 .xlsx 檔案，但原生白名單支援 .csv 試算表格式
-    // 轉為相容度最高的 UTF-8 CSV 格式以喚醒手機原生分享面板（Google 雲端硬碟、LINE、Gmail）
+    // 步驟 2: Android Chrome 安全限制阻擋 .xlsx 檔案，但原生白名單支援 .csv 試算表格式
     if (csvRows && csvRows.length > 0) {
       const csvBlob = buildCsvBlob(csvRows);
       const csvFileName = fileName.replace(/\.xlsx$/i, ".csv");
@@ -366,14 +410,13 @@ async function writeOrShareWorkbook(
       }
     }
 
-    // 若明確選擇「分享」，但當前環境（如電腦瀏覽器或 LINE 內置瀏覽器）完全不支援檔案分享
     if (mode === "share") {
       downloadBlob(xlsxBlob, fileName);
       return { shared: false, downloaded: true, unsupported: true, format: "xlsx" };
     }
   }
 
-  // mode === "download" 或自動降級
+  // 自動降級保底：本地下載
   downloadBlob(xlsxBlob, fileName);
   return { shared: false, downloaded: true, format: "xlsx" };
 }

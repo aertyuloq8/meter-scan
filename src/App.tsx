@@ -3,11 +3,15 @@ import {
   Camera,
   ChevronRight,
   ClipboardPlus,
+  Cloud,
+  CloudDownload,
+  CloudUpload,
   Database,
   Download,
   Edit3,
   FileSpreadsheet,
   FileText,
+  HardDrive,
   Image as ImageIcon,
   Info,
   Loader2,
@@ -35,7 +39,15 @@ import {
   incompleteCount,
   restoreFromExcel,
   canBrowserShareFiles,
+  type ExportDeliveryMode,
 } from "./exportExcel";
+import {
+  handleDriveOAuthRedirect,
+  listDriveBackups,
+  downloadDriveFile,
+  deleteDriveFile,
+  type DriveFileInfo,
+} from "./googleDrive";
 import { scanImage } from "./scanner";
 import {
   chooseBestQrText,
@@ -55,6 +67,7 @@ import {
   loadData,
   persistData,
   restoreFromFile,
+  restoreFromDriveBlob,
   flushPendingSave,
 } from "./storage";
 import { formatExpiryDate, formatServiceNumber, normalizeServiceNumberTo8Digits } from "./ocr";
@@ -96,6 +109,13 @@ export function App() {
   const [scanEngine, setScanEngine] = useState<"native" | "mlkit" | "zxing" | null>(null);
   const [exportTarget, setExportTarget] = useState<ExportTarget | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [driveProgress, setDriveProgress] = useState<{ percent: number; text: string } | null>(null);
+  const [driveModal, setDriveModal] = useState<{
+    type: "restore" | "delete";
+    files: DriveFileInfo[];
+    selectedIds: string[];
+  } | null>(null);
+  const [isDriveBusy, setIsDriveBusy] = useState(false);
   const isShareSupported = useMemo(() => canBrowserShareFiles() || isNativeApp(), []);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -133,6 +153,16 @@ export function App() {
     void initStorage((freshData) => {
       dataRef.current = freshData;
       setData(freshData);
+    });
+
+    handleDriveOAuthRedirect((resume) => {
+      if (resume?.type === "backup") {
+        void handleDriveBackup();
+      } else if (resume?.type === "restore") {
+        void handleDriveRestoreList();
+      } else if (resume?.type === "export" && resume.target) {
+        void executeExport(resume.target, resume.mode || "drive");
+      }
     });
   }, []);
 
@@ -1466,12 +1496,30 @@ export function App() {
     setExportTarget({ type: "backup" });
   }
 
-  async function executeExport(target: ExportTarget, mode: "share" | "download") {
+  async function executeExport(target: ExportTarget, mode: ExportDeliveryMode) {
     setIsExporting(true);
+    setDriveProgress(
+      mode === "drive" || mode === "both"
+        ? { percent: 10, text: "正在連接 Google 雲端硬碟…" }
+        : null,
+    );
+    const onProgress = (pct: number) => {
+      setDriveProgress({
+        percent: 10 + Math.round(pct * 0.85),
+        text: `上傳雲端硬碟 ${pct}%…`,
+      });
+    };
+
     try {
       if (target.type === "date") {
         const targetRecords = dataRef.current.folders[target.date]?.records ?? [];
-        const result = await exportRecords(targetRecords, target.date, dataRef.current.districtCode, mode);
+        const result = await exportRecords(
+          targetRecords,
+          target.date,
+          dataRef.current.districtCode,
+          mode,
+          onProgress,
+        );
         setExportTarget(null);
         if (result.delivery?.cancelled) {
           setStatus("idle");
@@ -1479,8 +1527,11 @@ export function App() {
           return;
         }
         setStatus("done");
-        if (result.delivery?.shared) {
-          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式，可直接存入 Google 雲端硬碟或 LINE）" : "";
+        if (result.delivery?.uploadedToDrive) {
+          const bothText = result.delivery.downloaded ? "，本機檔案亦同步下載完畢" : "";
+          setMessage(`✅ Excel 報表已成功上傳至個人 Google 雲端硬碟！${bothText}`);
+        } else if (result.delivery?.shared) {
+          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式）" : "";
           setMessage(`已開啟分享選單！${fmtText}`);
         } else if (result.delivery?.unsupported) {
           setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您自動下載 Excel 檔至本機（${result.recordCount} 筆）`);
@@ -1494,7 +1545,13 @@ export function App() {
             recordsByDate[date] = folder.records;
           }
         }
-        const result = await exportAllDates(recordsByDate, folderDates, dataRef.current.districtCode, mode);
+        const result = await exportAllDates(
+          recordsByDate,
+          folderDates,
+          dataRef.current.districtCode,
+          mode,
+          onProgress,
+        );
         setExportTarget(null);
         if (result.delivery?.cancelled) {
           setStatus("idle");
@@ -1502,8 +1559,11 @@ export function App() {
           return;
         }
         setStatus("done");
-        if (result.delivery?.shared) {
-          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式，可直接存入 Google 雲端硬碟或 LINE）" : "";
+        if (result.delivery?.uploadedToDrive) {
+          const bothText = result.delivery.downloaded ? "，本機檔案亦同步下載完畢" : "";
+          setMessage(`✅ 全部歷史報表已成功上傳至個人 Google 雲端硬碟！${bothText}`);
+        } else if (result.delivery?.shared) {
+          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式）" : "";
           setMessage(`已開啟分享選單！${fmtText}`);
         } else if (result.delivery?.unsupported) {
           setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您自動下載 Excel 檔至本機（全部日期共 ${result.recordCount} 筆）`);
@@ -1511,7 +1571,7 @@ export function App() {
           setMessage(`已下載全部日期的資料（共 ${result.recordCount} 筆）`);
         }
       } else if (target.type === "backup") {
-        const result = await exportBackup(dataRef.current, mode);
+        const result = await exportBackup(dataRef.current, mode, onProgress);
         setExportTarget(null);
         if (result.cancelled) {
           setStatus("idle");
@@ -1519,7 +1579,10 @@ export function App() {
           return;
         }
         setStatus("done");
-        if (result.shared) {
+        if (result.uploadedToDrive) {
+          const bothText = result.downloaded ? "，本機備份檔亦同步下載" : "";
+          setMessage(`✅ 完整備份檔已成功上傳至個人 Google 雲端硬碟！${bothText}`);
+        } else if (result.shared) {
           setMessage(`已開啟備份分享面板（${result.fileName}，可儲存至 Google 雲端硬碟或 LINE）`);
         } else if (result.unsupported) {
           setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您下載備份檔（${result.fileName}）`);
@@ -1533,6 +1596,180 @@ export function App() {
       setMessage(error instanceof Error ? error.message : "匯出失敗");
     } finally {
       setIsExporting(false);
+      setTimeout(() => setDriveProgress(null), 1500);
+    }
+  }
+
+  async function handleDriveBackup() {
+    setIsDriveBusy(true);
+    setDriveProgress({ percent: 10, text: "正在連接 Google 雲端硬碟…" });
+    try {
+      const result = await exportBackup(dataRef.current, "drive", (pct) => {
+        setDriveProgress({
+          percent: 10 + Math.round(pct * 0.85),
+          text: `上傳備份至雲端硬碟 ${pct}%…`,
+        });
+      });
+      setDriveProgress({ percent: 100, text: "完成" });
+      setStatus("done");
+      setMessage(`✅ 系統資料庫已成功備份至個人 Google 雲端硬碟（${result.fileName}）`);
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "雲端備份失敗");
+    } finally {
+      setIsDriveBusy(false);
+      setTimeout(() => setDriveProgress(null), 2000);
+    }
+  }
+
+  async function handleDriveRestoreList() {
+    setIsDriveBusy(true);
+    setDriveProgress({ percent: 20, text: "正在查詢雲端硬碟備份清單…" });
+    try {
+      const files = await listDriveBackups("電表");
+      if (!files.length) {
+        setStatus("idle");
+        setMessage("您的 Google 雲端硬碟中找不到任何電表備份檔案");
+        return;
+      }
+      setDriveModal({
+        type: "restore",
+        files,
+        selectedIds: [files[0].id],
+      });
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "讀取雲端備份清單失敗");
+    } finally {
+      setIsDriveBusy(false);
+      setDriveProgress(null);
+    }
+  }
+
+  async function handleDriveDeleteList() {
+    setIsDriveBusy(true);
+    setDriveProgress({ percent: 20, text: "正在查詢雲端硬碟備份清單…" });
+    try {
+      const files = await listDriveBackups("電表");
+      if (!files.length) {
+        setStatus("idle");
+        setMessage("您的 Google 雲端硬碟中目前沒有電表備份檔案");
+        return;
+      }
+      setDriveModal({
+        type: "delete",
+        files,
+        selectedIds: [],
+      });
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "讀取雲端備份清單失敗");
+    } finally {
+      setIsDriveBusy(false);
+      setDriveProgress(null);
+    }
+  }
+
+  async function confirmDriveRestore() {
+    if (!driveModal || !driveModal.selectedIds.length) return;
+    const fileId = driveModal.selectedIds[0];
+    const targetFile = driveModal.files.find((f) => f.id === fileId);
+    if (!targetFile) return;
+
+    if (
+      !window.confirm(
+        `確定從 Google 雲端硬碟下載並還原備份「${targetFile.name}」？此操作將合併/更新目前紀錄。`,
+      )
+    ) {
+      return;
+    }
+
+    setIsDriveBusy(true);
+    setDriveProgress({ percent: 10, text: "正在從雲端硬碟下載備份…" });
+    try {
+      const blob = await downloadDriveFile(fileId, (pct) => {
+        setDriveProgress({
+          percent: 10 + Math.round(pct * 0.7),
+          text: `下載雲端檔案 ${pct}%…`,
+        });
+      });
+      setDriveProgress({ percent: 85, text: "正在解析並還原資料庫…" });
+
+      if (/\.(xlsx|xls)$/i.test(targetFile.name)) {
+        const file = new File([blob], targetFile.name);
+        const importedFolders = await restoreFromExcel(file);
+        updateData((current) => {
+          const folders = { ...current.folders };
+          for (const [date, imported] of Object.entries(importedFolders)) {
+            const existing = folders[date] ?? { records: [], seenQrTexts: [] };
+            const known = new Set(existing.records.map((r) => JSON.stringify(r)));
+            const merged = [...existing.records];
+            for (const r of imported.records) {
+              const sig = JSON.stringify(r);
+              if (!known.has(sig)) {
+                merged.push(r);
+                known.add(sig);
+              }
+            }
+            folders[date] = { ...existing, records: merged };
+          }
+          return { ...current, folders };
+        });
+      } else {
+        const restored = await restoreFromDriveBlob(blob);
+        setData(restored);
+        dataRef.current = restored;
+      }
+
+      setDriveProgress({ percent: 100, text: "還原成功" });
+      setDriveModal(null);
+      setStatus("done");
+      setMessage(`✅ 雲端備份「${targetFile.name}」已成功還原！`);
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "雲端還原失敗");
+    } finally {
+      setIsDriveBusy(false);
+      setTimeout(() => setDriveProgress(null), 1500);
+    }
+  }
+
+  async function confirmDriveDelete() {
+    if (!driveModal || !driveModal.selectedIds.length) {
+      alert("請先勾選要刪除的備份檔案");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `確定自個人 Google 雲端硬碟刪除所選的 ${driveModal.selectedIds.length} 個備份？此動作無法復原（本機資料不受影響）。`,
+      )
+    ) {
+      return;
+    }
+
+    setIsDriveBusy(true);
+    setDriveProgress({ percent: 10, text: "正在自雲端硬碟刪除備份…" });
+    try {
+      let deleted = 0;
+      for (const id of driveModal.selectedIds) {
+        await deleteDriveFile(id);
+        deleted++;
+        setDriveProgress({
+          percent: 10 + Math.round((deleted / driveModal.selectedIds.length) * 85),
+          text: `已刪除 ${deleted} / ${driveModal.selectedIds.length} 個備份…`,
+        });
+      }
+      setDriveProgress({ percent: 100, text: "刪除完成" });
+      setDriveModal(null);
+      setStatus("done");
+      setMessage(`✅ 已成功從 Google 雲端硬碟刪除 ${deleted} 個備份檔案`);
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "刪除雲端備份失敗");
+    } finally {
+      setIsDriveBusy(false);
+      setTimeout(() => setDriveProgress(null), 1500);
     }
   }
 
@@ -2461,28 +2698,93 @@ export function App() {
               </div>
             </div>
 
-            {/* 卡片 2: 資料備份與還原 */}
+            {/* 卡片 2: 資料備份與還原 (參考 webpro 架構) */}
             <div className="settings-card">
               <div className="settings-card-header">
                 <Database size={16} />
                 <span>資料備份與還原</span>
               </div>
+
+              {/* 雲端 Drive 專區 */}
+              <div
+                className="settings-tip-banner"
+                style={{ background: "#f0f9ff", borderColor: "#bae6fd", color: "#0369a1" }}
+              >
+                <Cloud size={16} />
+                <span>Google 雲端硬碟直連：免裝軟體，一鍵備份與跨裝置還原</span>
+              </div>
+
               <div className="settings-item">
                 <div className="settings-item-info">
-                  <span className="settings-item-title">完整備份 (JSON)</span>
-                  <span className="settings-item-desc">將所有日期、電表紀錄與設定輸出為單一 JSON 備份檔</span>
+                  <span className="settings-item-title">備份到 Google Drive</span>
+                  <span className="settings-item-desc">登入 Google 帳號，直接將資料庫備份儲存至個人雲端硬碟</span>
                 </div>
                 <div className="settings-item-action">
-                  <button className="settings-action-btn" type="button" onClick={handleBackup}>
-                    <Download size={14} /> 備份
+                  <button
+                    className="settings-action-btn"
+                    style={{ background: "#0284c7", color: "#fff", borderColor: "#0284c7" }}
+                    disabled={isDriveBusy}
+                    type="button"
+                    onClick={() => void handleDriveBackup()}
+                  >
+                    {isDriveBusy ? <Loader2 size={14} className="spin" /> : <CloudUpload size={14} />} 備份至 Drive
                   </button>
                 </div>
               </div>
 
               <div className="settings-item">
                 <div className="settings-item-info">
-                  <span className="settings-item-title">資料還原</span>
-                  <span className="settings-item-desc">支援 JSON 備份檔或歷史 Excel 報表匯入</span>
+                  <span className="settings-item-title">從 Google Drive 還原</span>
+                  <span className="settings-item-desc">讀取個人雲端硬碟中的電表備份檔案清單並直接還原</span>
+                </div>
+                <div className="settings-item-action">
+                  <button
+                    className="settings-action-btn"
+                    disabled={isDriveBusy}
+                    type="button"
+                    onClick={() => void handleDriveRestoreList()}
+                  >
+                    {isDriveBusy ? <Loader2 size={14} className="spin" /> : <CloudDownload size={14} />} 從 Drive 還原
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-item">
+                <div className="settings-item-info">
+                  <span className="settings-item-title">刪除雲端硬碟舊備份</span>
+                  <span className="settings-item-desc">清理個人雲端硬碟中的歷史電表備份（本機資料不受影響）</span>
+                </div>
+                <div className="settings-item-action">
+                  <button
+                    className="settings-action-btn danger"
+                    disabled={isDriveBusy}
+                    type="button"
+                    onClick={() => void handleDriveDeleteList()}
+                  >
+                    <Trash2 size={14} /> 刪除雲端備份
+                  </button>
+                </div>
+              </div>
+
+              <hr style={{ border: "none", borderTop: "1px solid #eef2ed", margin: "10px 0" }} />
+
+              {/* 本地檔案備份與還原 */}
+              <div className="settings-item">
+                <div className="settings-item-info">
+                  <span className="settings-item-title">完整備份 (本地下載)</span>
+                  <span className="settings-item-desc">將所有日期、電表紀錄與設定輸出為單一 JSON 備份檔至本機</span>
+                </div>
+                <div className="settings-item-action">
+                  <button className="settings-action-btn" type="button" onClick={handleBackup}>
+                    <Download size={14} /> 本地備份
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-item">
+                <div className="settings-item-info">
+                  <span className="settings-item-title">資料還原 (本地選擇)</span>
+                  <span className="settings-item-desc">從本機選取 JSON 備份檔或歷史 Excel 報表匯入</span>
                 </div>
                 <div className="settings-item-action">
                   <button
@@ -3049,27 +3351,45 @@ export function App() {
                 </div>
               )}
 
+              {/* 即時上傳 / 下載進度條 */}
+              {driveProgress ? (
+                <div className="drive-progress-container">
+                  <div className="drive-progress-head">
+                    <span>{driveProgress.text}</span>
+                    <span>{driveProgress.percent}%</span>
+                  </div>
+                  <div className="drive-progress-bar">
+                    <div
+                      className="drive-progress-fill"
+                      style={{ width: `${driveProgress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
               <div className="export-actions-list">
+                {/* 1. 儲存至 Google 雲端硬碟 */}
                 <button
                   type="button"
-                  className="export-option-btn primary-share"
+                  className="export-option-btn cloud-drive"
                   disabled={isExporting}
-                  onClick={() => void executeExport(exportTarget, "share")}
+                  onClick={() => void executeExport(exportTarget, "drive")}
                 >
-                  <div className="export-option-icon share-icon">
-                    {isExporting ? <Loader2 size={24} className="spin" /> : <Share2 size={24} />}
+                  <div className="export-option-icon drive-icon">
+                    {isExporting ? <Loader2 size={24} className="spin" /> : <CloudUpload size={24} />}
                   </div>
                   <div className="export-option-info">
                     <div className="export-option-title-row">
-                      <span className="export-option-title">分享 / 儲存至 Google 雲端硬碟</span>
-                      <span className="export-option-badge">{isShareSupported ? "手機推薦" : "雲端硬碟"}</span>
+                      <span className="export-option-title">儲存至 Google 雲端硬碟 (Drive)</span>
+                      <span className="export-option-badge" style={{ background: "#0284c7" }}>雲端直存</span>
                     </div>
                     <span className="export-option-desc">
-                      立即呼叫手機系統分享選單，可直接存入「Google 雲端硬碟」、傳送至 LINE 或寄送 Email
+                      登入個人 Google 帳號，直接將檔案上傳至 Google 雲端硬碟，免佔手機容量
                     </span>
                   </div>
                 </button>
 
+                {/* 2. 直接下載至本機 */}
                 <button
                   type="button"
                   className="export-option-btn secondary-download"
@@ -3080,9 +3400,58 @@ export function App() {
                     <Download size={24} />
                   </div>
                   <div className="export-option-info">
-                    <span className="export-option-title">直接下載 Excel 檔 (.xlsx)</span>
+                    <div className="export-option-title-row">
+                      <span className="export-option-title">
+                        {exportTarget.type === "backup" ? "直接下載備份檔 (.json)" : "直接下載 Excel 檔 (.xlsx)"}
+                      </span>
+                      <span className="export-option-badge" style={{ background: "#64748b" }}>本地下載</span>
+                    </div>
                     <span className="export-option-desc">
-                      直接將包含「電表資料」與「統計」雙分頁之 Excel 活頁簿下載至手機「下載」資料夾
+                      直接將檔案儲存至手機或電腦「下載」資料夾，隨時可用
+                    </span>
+                  </div>
+                </button>
+
+                {/* 3. 本機與雲端都要 */}
+                <button
+                  type="button"
+                  className="export-option-btn both-option"
+                  disabled={isExporting}
+                  onClick={() => void executeExport(exportTarget, "both")}
+                >
+                  <div className="export-option-icon both-icon">
+                    <HardDrive size={24} />
+                  </div>
+                  <div className="export-option-info">
+                    <div className="export-option-title-row">
+                      <span className="export-option-title">本機與雲端都要 (雙重保存)</span>
+                      <span className="export-option-badge" style={{ background: "#ca8a04" }}>雙重保險</span>
+                    </div>
+                    <span className="export-option-desc">
+                      下載檔案至手機本機，同時自動上傳備份至個人的 Google 雲端硬碟
+                    </span>
+                  </div>
+                </button>
+
+                {/* 4. 手機系統原生分享 */}
+                <button
+                  type="button"
+                  className="export-option-btn system-share"
+                  disabled={isExporting}
+                  onClick={() => void executeExport(exportTarget, "share")}
+                >
+                  <div className="export-option-icon system-icon">
+                    <Share2 size={24} />
+                  </div>
+                  <div className="export-option-info">
+                    <div className="export-option-title-row">
+                      <span className="export-option-title">手機系統原生分享</span>
+                      <span className="export-option-badge" style={{ background: "#475569" }}>
+                        {isShareSupported ? "手機支援" : "LINE / 郵件"}
+                      </span>
+                    </div>
+                    <span className="export-option-desc">
+                      呼叫手機系統原生分享選單，可將報表直接傳送至 LINE 好友、Gmail 或其他通訊軟體
                     </span>
                   </div>
                 </button>
@@ -3097,6 +3466,125 @@ export function App() {
                 >
                   取消
                 </button>
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {/* Google 雲端硬碟備份還原與刪除彈窗 */}
+        {driveModal ? (
+          <div className="completion-overlay" onClick={() => !isDriveBusy && setDriveModal(null)}>
+            <section
+              className="export-dialog-card"
+              role="dialog"
+              aria-modal="true"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="export-dialog-header">
+                <div>
+                  <h3>
+                    {driveModal.type === "restore"
+                      ? "☁️ 選擇 Google 雲端備份並還原"
+                      : "🗑 刪除 Google 雲端硬碟備份"}
+                  </h3>
+                  <span className="export-dialog-subtitle">
+                    {driveModal.type === "restore"
+                      ? "請選取要從雲端下載並還原的備份檔案："
+                      : "請勾選要自雲端硬碟刪除的備份檔案（可多選）："}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="dialog-close-btn"
+                  title="關閉"
+                  disabled={isDriveBusy}
+                  onClick={() => setDriveModal(null)}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {driveProgress ? (
+                <div className="drive-progress-container">
+                  <div className="drive-progress-head">
+                    <span>{driveProgress.text}</span>
+                    <span>{driveProgress.percent}%</span>
+                  </div>
+                  <div className="drive-progress-bar">
+                    <div
+                      className="drive-progress-fill"
+                      style={{ width: `${driveProgress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="drive-file-list">
+                {driveModal.files.map((file) => {
+                  const isChecked = driveModal.selectedIds.includes(file.id);
+                  return (
+                    <label key={file.id} className="drive-file-item">
+                      <input
+                        type={driveModal.type === "restore" ? "radio" : "checkbox"}
+                        name="driveBackupItem"
+                        className="drive-file-radio"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (driveModal.type === "restore") {
+                            setDriveModal({ ...driveModal, selectedIds: [file.id] });
+                          } else {
+                            const next = isChecked
+                              ? driveModal.selectedIds.filter((id) => id !== file.id)
+                              : [...driveModal.selectedIds, file.id];
+                            setDriveModal({ ...driveModal, selectedIds: next });
+                          }
+                        }}
+                      />
+                      <div className="drive-file-details">
+                        <span className="drive-file-name">{file.name}</span>
+                        <span className="drive-file-meta">
+                          {file.createdTime ? new Date(file.createdTime).toLocaleString("zh-TW") : ""}
+                          {file.size ? ` · ${(file.size / 1024).toFixed(1)} KB` : ""}
+                        </span>
+                        {file.description ? (
+                          <span className="drive-file-desc">📋 {file.description}</span>
+                        ) : null}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="export-dialog-footer" style={{ gap: "10px" }}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={isDriveBusy}
+                  onClick={() => setDriveModal(null)}
+                >
+                  取消
+                </button>
+                {driveModal.type === "restore" ? (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    style={{ background: "#0284c7" }}
+                    disabled={isDriveBusy || !driveModal.selectedIds.length}
+                    onClick={() => void confirmDriveRestore()}
+                  >
+                    {isDriveBusy ? <Loader2 size={16} className="spin" /> : <CloudDownload size={16} />} 下載並還原
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    style={{ background: "#dc2626" }}
+                    disabled={isDriveBusy || !driveModal.selectedIds.length}
+                    onClick={() => void confirmDriveDelete()}
+                  >
+                    {isDriveBusy ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />} 確定刪除所選
+                  </button>
+                )}
               </div>
             </section>
           </div>

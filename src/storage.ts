@@ -262,10 +262,13 @@ export function flushPendingSave(): void {
   }
 }
 
+import { uploadFileToDrive } from "./googleDrive";
+
 export type BackupExportResult = {
   fileName: string;
-  shared: boolean;
-  downloaded: boolean;
+  shared?: boolean;
+  downloaded?: boolean;
+  uploadedToDrive?: boolean;
   cancelled?: boolean;
   unsupported?: boolean;
 };
@@ -294,7 +297,8 @@ function downloadBlob(blob: Blob, fileName: string): void {
 
 export async function exportBackup(
   data: StoredAppData,
-  mode: "share" | "download" | "auto" = "auto",
+  mode: "local" | "drive" | "both" | "share" | "download" | "auto" = "auto",
+  onProgress?: (percent: number) => void,
 ): Promise<BackupExportResult> {
   const json = JSON.stringify(data, null, 2);
   const fileName = `電表資料備份_${timestampForName()}.json`;
@@ -306,7 +310,7 @@ export async function exportBackup(
       directory: Directory.Cache,
       encoding: Encoding.UTF8,
     });
-    if (mode === "download") {
+    if (mode === "download" || mode === "local") {
       await Filesystem.writeFile({
         path: fileName,
         data: json,
@@ -327,8 +331,32 @@ export async function exportBackup(
   const mimeType = "application/json";
   const blob = new Blob([json], { type: mimeType });
 
+  // 模式 A: 上傳至 Google Drive (個人雲端硬碟) 或本機與雲端皆存
+  if (mode === "drive" || mode === "both") {
+    const totalRecords = Object.values(data.folders).reduce(
+      (sum, folder) => sum + folder.records.length,
+      0,
+    );
+    const dateCount = Object.keys(data.folders).length;
+    const description = `電表系統備份檔 · 日期${dateCount}個 · 電表${totalRecords}筆`;
+
+    await uploadFileToDrive(blob, fileName, mimeType, description, onProgress);
+    if (mode === "both") {
+      downloadBlob(blob, fileName);
+      return { fileName, shared: false, downloaded: true, uploadedToDrive: true };
+    }
+    return { fileName, shared: false, downloaded: false, uploadedToDrive: true };
+  }
+
+  // 模式 B: 明確本地下載
+  if (mode === "local" || mode === "download") {
+    downloadBlob(blob, fileName);
+    return { fileName, shared: false, downloaded: true };
+  }
+
+  // 模式 C: 系統原生分享 (Web Share API)
   if (mode === "share" || mode === "auto") {
-    // 步驟 A: 嘗試直接分享 .json
+    // 步驟 1: 嘗試直接分享 .json
     const jsonFile = new File([blob], fileName, { type: mimeType });
     if (canShareFile(jsonFile)) {
       try {
@@ -346,7 +374,7 @@ export async function exportBackup(
       }
     }
 
-    // 步驟 B: Android Chrome 阻擋 .json 檔案類型，但白名單允許 .txt 格式
+    // 步驟 2: Android Chrome 阻擋 .json 檔案類型，但白名單允許 .txt 格式
     const txtFileName = `電表資料備份_${timestampForName()}.txt`;
     const txtFile = new File([blob], txtFileName, { type: "text/plain;charset=utf-8" });
     if (canShareFile(txtFile)) {
@@ -371,6 +399,7 @@ export async function exportBackup(
     }
   }
 
+  // 自動降級保底：本地下載
   downloadBlob(blob, fileName);
   return { fileName, shared: false, downloaded: true };
 }
@@ -395,6 +424,17 @@ export function restoreFromFile(file: File): Promise<StoredAppData> {
     };
     reader.readAsText(file);
   });
+}
+
+export async function restoreFromDriveBlob(blob: Blob): Promise<StoredAppData> {
+  const text = await blob.text();
+  const parsed = JSON.parse(text);
+  const sanitized = sanitizeData(parsed);
+  if (!Object.keys(sanitized.folders).length && !sanitized.lastQrText) {
+    throw new Error("備份檔內容似乎不是有效的電表資料");
+  }
+  persistNow(sanitized);
+  return sanitized;
 }
 
 function timestampForName(): string {
