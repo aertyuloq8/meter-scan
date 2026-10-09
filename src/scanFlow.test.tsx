@@ -182,7 +182,7 @@ describe("Bug1：存檔繼續掃後亂入別張MS", () => {
     gotoTab("現場掃描");
     // 鏡頭還照著舊表＋亂入別張貼紙（同框）：舊表只提示已完成，不建鎖定
     await emit([FIELD.RT_NP, FIELD.MS04]);
-    await expectBanner("這台電表已完成");
+    await expectBanner("此電表已完成");
     // 再單張亂入：無歸屬，只能回請先掃描
     await emit([FIELD.MS04]);
     await expectBanner("請先掃描電表QRcode");
@@ -200,7 +200,7 @@ describe("Bug2：存檔繼續掃後同表重掃＋換下一顆", () => {
     await saveAndContinue();
     // 同表重掃：提示已完成（沒有按換表也能繼續）
     await emit([FIELD.RT_NP]);
-    await expectBanner("這台電表已完成");
+    await expectBanner("此電表已完成");
     // 直接掃下一顆：免重設，直接 1/2
     await emitUntil([FIELD.GV_NP], "1 / 2 缺檢驗號碼");
     await emitUntil([FIELD.GV_INSP], "配對成功，請掃電號貼紙");

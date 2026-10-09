@@ -778,7 +778,7 @@ export function App() {
       document.documentElement.classList.add("barcode-scanner-active");
       document.body.classList.add("barcode-scanner-active");
       setStatus("scanning");
-      setMessage("連續掃描中，請先掃同一台電表的兩個 QRCode");
+      setMessage("連續掃描中，請先掃同一個電表的兩個 QRCode");
       void acquireWakeLock();
 
       nativeListenerRef.current = await BarcodeScanner.addListener("barcodesScanned", (event) => {
@@ -871,7 +871,7 @@ export function App() {
       const hasAnyNew = meterTexts.some((text) => !completedOldTexts.includes(text));
       if (!hasAnyNew) {
         setStatus("duplicate");
-        setMessage("這台電表已完成，請移動到下一台電表");
+        setMessage("此電表已完成，請移動到下一個電表");
         feedbackDuplicate();
         return;
       }
@@ -968,7 +968,7 @@ export function App() {
     }
     const hasService = Boolean((matchedRecord.serviceNumber ?? "").replace(/\D/g, ""));
     const pairComplete = isMeterPairComplete(matchedRecord, folder.seenQrTexts);
-    // 只要此表已配對完成且已填電號，整台電表即為已結案完成！
+    // 只要此表已配對完成且已填電號，該電表即為已結案完成！
     if (pairComplete && hasService) {
       return true;
     }
@@ -1276,7 +1276,7 @@ export function App() {
       return;
     }
     if (recordService) {
-      // 抽屜未開且該表已有電號：代表這張表早已完成，相機掃到的 MS 貼紙不可覆蓋，提示請先掃下一台電表
+      // 抽屜未開且該表已有電號：代表這張表早已完成，相機掃到的 MS 貼紙不可覆蓋，提示請先掃下一個電表
       updateData((current) => ({ ...current, lastQrText: cleanedServiceText }));
       setStatus("error");
       setMessage("請先掃描電表QRcode");
@@ -1479,7 +1479,7 @@ export function App() {
           return;
         }
         setStatus("duplicate");
-        setMessage("這組 QRCode 已掃描過，請移動到同一台電表的另一個 QRCode");
+        setMessage("這組 QRCode 已掃描過，請移動到同一個電表的另一個 QRCode");
         feedbackDuplicate();
         return;
       }
@@ -1922,7 +1922,7 @@ export function App() {
             <header className="app-header">
               <div className="app-header-left">
                 <div className="eyebrow-row">
-                  <span className="eyebrow-text">台電電表作業</span>
+                  <span className="eyebrow-text">電表作業</span>
                   <span className="eyebrow-version">v{APP_VERSION}</span>
                 </div>
                 <h1 className="header-title">電表 QRCode 掃描</h1>

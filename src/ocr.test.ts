@@ -56,7 +56,7 @@ describe("formatExpiryDate", () => {
   });
 });
 
-describe("calculateCheckDigit (台電《檢算碼原理》規範)", () => {
+describe("calculateCheckDigit (《檢算碼原理》規範)", () => {
   it("calculates correct check digit for PDF official sample 1119438110 -> 5", () => {
     expect(calculateCheckDigit("1119438110")).toBe(5);
   });

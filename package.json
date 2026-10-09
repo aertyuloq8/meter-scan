@@ -1,7 +1,7 @@
 {
   "name": "meter-scan-web",
   "version": "2.4.3",
-  "description": "台電電表資料掃描系統 (Web PWA)",
+  "description": "電表資料掃描系統 (Web PWA)",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "dev:https": "vite --host 0.0.0.0 --mode https",
