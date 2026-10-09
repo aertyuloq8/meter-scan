@@ -134,8 +134,6 @@ async function bootContinuous() {
   resetStorageCacheForTests();
   const { App } = await import("./App");
   render(<App />);
-  // 切連續掃描（預設單次）
-  fireEvent.click(screen.getByLabelText("單次掃描 (讀完即停)"));
   // 電號標籤掃描預設必須是開的
   expect((screen.getByLabelText("電號標籤掃描") as HTMLInputElement).checked).toBe(true);
   await pressStartContinuous();

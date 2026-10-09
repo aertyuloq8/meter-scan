@@ -19,7 +19,7 @@ const defaultData: StoredAppData = {
   servicePrefix: "",
   servicePrefixEnabled: false,
   scanIntervalMs: 1000,
-  scanMode: "manual",
+  scanMode: "auto",
   serviceQrEnabled: true,
   keypadMode: "large",
   lastQrText: "",
@@ -110,7 +110,7 @@ export function loadData(): StoredAppData {
 
     const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
     if (legacyRaw) {
-      const migrated = { ...sanitizeData(JSON.parse(legacyRaw)), scanMode: "manual" as const };
+      const migrated = { ...sanitizeData(JSON.parse(legacyRaw)), scanMode: "auto" as const };
       cachedInMemoryData = migrated;
       persistNow(migrated);
       localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -205,7 +205,7 @@ export function sanitizeData(raw: unknown): StoredAppData {
       typeof candidate.scanIntervalMs === "number" && candidate.scanIntervalMs > 0
         ? candidate.scanIntervalMs
         : defaultData.scanIntervalMs,
-    scanMode: candidate.scanMode === "auto" ? "auto" : "manual",
+    scanMode: "auto",
     serviceQrEnabled: candidate.serviceQrEnabled ?? true,
     keypadMode: candidate.keypadMode === "system" ? "system" : "large",
     lastQrText: String(candidate.lastQrText ?? ""),
@@ -262,7 +262,17 @@ export function flushPendingSave(): void {
   }
 }
 
-export async function exportBackup(data: StoredAppData): Promise<string> {
+export type BackupExportResult = {
+  fileName: string;
+  shared: boolean;
+  downloaded: boolean;
+  cancelled?: boolean;
+};
+
+export async function exportBackup(
+  data: StoredAppData,
+  mode: "share" | "download" | "auto" = "auto",
+): Promise<BackupExportResult> {
   const json = JSON.stringify(data, null, 2);
   const fileName = `電表資料備份_${timestampForName()}.json`;
 
@@ -273,16 +283,57 @@ export async function exportBackup(data: StoredAppData): Promise<string> {
       directory: Directory.Cache,
       encoding: Encoding.UTF8,
     });
+    if (mode === "download") {
+      await Filesystem.writeFile({
+        path: fileName,
+        data: json,
+        directory: Directory.Documents,
+        encoding: Encoding.UTF8,
+      });
+      return { fileName, shared: false, downloaded: true };
+    }
     await Share.share({
       title: "匯出電表資料備份",
       text: fileName,
       url: result.uri,
-      dialogTitle: "儲存或分享 JSON 備份",
+      dialogTitle: "儲存至 Google 雲端硬碟或分享 JSON 備份",
     });
-    return fileName;
+    return { fileName, shared: true, downloaded: false };
   }
 
-  const blob = new Blob([json], { type: "application/json" });
+  const mimeType = "application/json";
+  const blob = new Blob([json], { type: mimeType });
+
+  const canShare = typeof navigator !== "undefined" && !!navigator.share && !!navigator.canShare;
+  let canShareFiles = false;
+  if (canShare) {
+    try {
+      const testFile = new File([blob], fileName, { type: mimeType });
+      canShareFiles = navigator.canShare({ files: [testFile] });
+    } catch {
+      canShareFiles = false;
+    }
+  }
+
+  const shouldShare = mode === "share" || (mode === "auto" && canShareFiles);
+
+  if (shouldShare && canShareFiles) {
+    try {
+      const file = new File([blob], fileName, { type: mimeType });
+      await navigator.share({
+        title: "電表資料備份",
+        text: `電表資料備份：${fileName}`,
+        files: [file],
+      });
+      return { fileName, shared: true, downloaded: false };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return { fileName, shared: false, downloaded: false, cancelled: true };
+      }
+      console.warn("Web Share 備份失敗，自動切換至下載：", error);
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -291,7 +342,7 @@ export async function exportBackup(data: StoredAppData): Promise<string> {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return fileName;
+  return { fileName, shared: false, downloaded: true };
 }
 
 export function restoreFromFile(file: File): Promise<StoredAppData> {

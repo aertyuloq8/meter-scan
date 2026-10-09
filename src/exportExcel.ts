@@ -7,16 +7,34 @@ import { formatFullServiceNumber11, normalizeServiceNumberTo8Digits } from "./oc
 
 const headers = ["電號", "型式", "表號", "製造日期", "檢驗號碼", "檢定期限", "匯出時間"] as const;
 
+export type ExportDeliveryMode = "share" | "download" | "auto";
+
 export type ExportResult = {
   fileName: string;
   recordCount: number;
   incompleteCount: number;
+  delivery?: { shared: boolean; downloaded: boolean; cancelled?: boolean };
 };
+
+export function canBrowserShareFiles(): boolean {
+  if (typeof navigator === "undefined" || !navigator.share || !navigator.canShare) {
+    return false;
+  }
+  try {
+    const testFile = new File(["test"], "test.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    return navigator.canShare({ files: [testFile] });
+  } catch {
+    return false;
+  }
+}
 
 export async function exportRecords(
   records: MeterRecord[],
   folderDate: string,
   districtCode = "10",
+  mode: ExportDeliveryMode = "auto",
 ): Promise<ExportResult> {
   const exportTime = formattedNow();
   const rows: string[][] = records.map((record) => [
@@ -31,12 +49,13 @@ export async function exportRecords(
 
   const fileName = `電表資料_${folderDate.replaceAll("-", "")}.xlsx`;
   const workbook = buildWorkbook([headers.slice(), ...rows], statsSheet(folderDate, records));
-  await writeOrShareWorkbook(workbook, fileName);
+  const delivery = await writeOrShareWorkbook(workbook, fileName, mode);
 
   return {
     fileName,
     recordCount: records.length,
     incompleteCount: records.filter((record) => !record.serviceNumber).length,
+    delivery,
   };
 }
 
@@ -44,6 +63,7 @@ export async function exportAllDates(
   folders: Record<string, MeterRecord[]>,
   preferredOrder: string[],
   districtCode = "10",
+  mode: ExportDeliveryMode = "auto",
 ): Promise<ExportResult> {
   const exportTime = formattedNow();
   const dates = preferredOrder.filter((date) => (folders[date] ?? []).length > 0);
@@ -71,12 +91,13 @@ export async function exportAllDates(
   const allHeaders = ["日期", ...headers] as const;
   const fileName = `電表資料全部_${exportTime.replace(/[/:]/g, "")}.xlsx`;
   const workbook = buildWorkbook([allHeaders.slice(), ...rows], undefined);
-  await writeOrShareWorkbook(workbook, fileName);
+  const delivery = await writeOrShareWorkbook(workbook, fileName, mode);
 
   return {
     fileName,
     recordCount: rows.length,
     incompleteCount: rows.filter((row) => !row[1]).length,
+    delivery,
   };
 }
 
@@ -223,7 +244,12 @@ function buildWorkbook(rows: string[][], stats: string[][] | undefined) {
   return workbook;
 }
 
-async function writeOrShareWorkbook(workbook: XLSX.WorkBook, fileName: string): Promise<void> {
+async function writeOrShareWorkbook(
+  workbook: XLSX.WorkBook,
+  fileName: string,
+  mode: ExportDeliveryMode = "auto",
+): Promise<{ shared: boolean; downloaded: boolean; cancelled?: boolean }> {
+  // 1. 原生 Capacitor App（若打包為 APK）
   if (isNativeApp()) {
     const base64 = XLSX.write(workbook, { bookType: "xlsx", type: "base64" });
     const result = await Filesystem.writeFile({
@@ -232,19 +258,53 @@ async function writeOrShareWorkbook(workbook: XLSX.WorkBook, fileName: string): 
       directory: Directory.Cache,
     });
 
+    if (mode === "download") {
+      await Filesystem.writeFile({
+        path: fileName,
+        data: base64,
+        directory: Directory.Documents,
+      });
+      return { shared: false, downloaded: true };
+    }
+
     await Share.share({
       title: "匯出電表資料",
       text: fileName,
       url: result.uri,
-      dialogTitle: "儲存或分享 Excel",
+      dialogTitle: "儲存或分享 Excel（可存至 Google 雲端硬碟、LINE）",
     });
-    return;
+    return { shared: true, downloaded: false };
   }
 
+  // 2. Web 環境（PWA / 瀏覽器）
   const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-  const blob = new Blob([arrayBuffer], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
+  const mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const blob = new Blob([arrayBuffer], { type: mimeType });
+
+  const shouldShare = mode === "share" || (mode === "auto" && canBrowserShareFiles());
+
+  if (shouldShare && canBrowserShareFiles()) {
+    try {
+      const file = new File([blob], fileName, { type: mimeType });
+      await navigator.share({
+        title: "電表資料",
+        text: `電表資料：${fileName}`,
+        files: [file],
+      });
+      return { shared: true, downloaded: false };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return { shared: false, downloaded: false, cancelled: true };
+      }
+      console.warn("Web Share 失敗，自動切換至下載：", error);
+    }
+  }
+
+  downloadBlob(blob, fileName);
+  return { shared: false, downloaded: true };
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -252,7 +312,7 @@ async function writeOrShareWorkbook(workbook: XLSX.WorkBook, fileName: string): 
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function formattedNow(): string {

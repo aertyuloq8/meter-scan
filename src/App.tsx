@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Share2,
   SlidersHorizontal,
   Sparkles,
   Square,
@@ -28,7 +29,13 @@ import { Capacitor } from "@capacitor/core";
 import { BarcodeFormat, BarcodeScanner } from "@capacitor-mlkit/barcode-scanning";
 import { BrowserQRCodeReader } from "@zxing/browser";
 import { BarcodeFormat as ZXBarcodeFormat, DecodeHintType } from "@zxing/library";
-import { exportRecords, exportAllDates, incompleteCount, restoreFromExcel } from "./exportExcel";
+import {
+  exportRecords,
+  exportAllDates,
+  incompleteCount,
+  restoreFromExcel,
+  canBrowserShareFiles,
+} from "./exportExcel";
 import { scanImage } from "./scanner";
 import {
   chooseBestQrText,
@@ -62,6 +69,11 @@ type HandleQrOptions = {
 
 type ActiveTab = "scan" | "list" | "settings";
 
+type ExportTarget =
+  | { type: "date"; date: string }
+  | { type: "all" }
+  | { type: "backup" };
+
 export function App() {
   const [data, setData] = useState<StoredAppData>(() => loadData());
   const [activeTab, setActiveTab] = useState<ActiveTab>("scan");
@@ -82,6 +94,9 @@ export function App() {
   const [preScanExpiryDraft, setPreScanExpiryDraft] = useState("");
   const [selectedExportDate, setSelectedExportDate] = useState(today());
   const [scanEngine, setScanEngine] = useState<"native" | "mlkit" | "zxing" | null>(null);
+  const [exportTarget, setExportTarget] = useState<ExportTarget | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const isShareSupported = useMemo(() => canBrowserShareFiles() || isNativeApp(), []);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const controlsRef = useRef<{ stop: () => void } | null>(null);
@@ -106,7 +121,6 @@ export function App() {
   const nativeTargetMeterRef = useRef<string | null>(null);
   const nativeProcessingRef = useRef(false);
   const scanReadyAtRef = useRef(0);
-  const manualScanArmedRef = useRef(false);
   const dataRef = useRef(data);
   const activeDateRef = useRef(activeDate);
   const cameraActiveRef = useRef(cameraActive);
@@ -484,11 +498,7 @@ export function App() {
     setTargetMeterLive(null);
     nativeSessionTextsRef.current.clear();
     if (isNativeApp()) {
-      if (dataRef.current.scanMode === "auto") {
-        await startNativeContinuousScan();
-      } else {
-        await scanNativeOnce();
-      }
+      await startNativeContinuousScan();
       return;
     }
 
@@ -615,7 +625,6 @@ export function App() {
           try {
             const detected = await detector.detect(video);
             if (detected.length > 0 && cameraActiveRef.current && canAcceptCameraScan()) {
-              manualScanArmedRef.current = false;
               await handleScannedBarcodes(detected);
             }
           } catch {
@@ -667,7 +676,6 @@ export function App() {
             return;
           }
 
-          manualScanArmedRef.current = false;
           void handleScannedBarcodes([{ rawValue: text }]);
         });
 
@@ -936,7 +944,7 @@ export function App() {
     freshTexts.forEach((text) => nativeSessionTextsRef.current.add(text));
     nativeProcessingRef.current = true;
     try {
-      await handleQrTexts(freshTexts, { continuous: dataRef.current.scanMode === "auto" });
+      await handleQrTexts(freshTexts, { continuous: true });
     } finally {
       nativeProcessingRef.current = false;
     }
@@ -1025,83 +1033,12 @@ export function App() {
     document.body.classList.remove("barcode-scanner-active");
     nativeRestartReadyAtRef.current = Date.now() + 650;
     scanReadyAtRef.current = 0;
-    manualScanArmedRef.current = false;
     await releaseWakeLock();
     setCameraActive(false);
   }
 
-  async function scanWithNativeUi(): Promise<string[]> {
-    try {
-      if (!(await ensureNativeCameraPermission())) {
-        return [];
-      }
-
-      const supported = await BarcodeScanner.isSupported();
-      if (!supported.supported) {
-        setStatus("error");
-        setMessage("此裝置不支援原生 QRCode 掃描");
-        return [];
-      }
-
-      const module = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable();
-      if (!module.available) {
-        await BarcodeScanner.installGoogleBarcodeScannerModule();
-        setStatus("scanning");
-        setMessage("正在安裝 Google 掃描模組，完成後請再掃描一次");
-        return [];
-      }
-
-      const result = await BarcodeScanner.scan({
-        formats: [BarcodeFormat.QrCode],
-        autoZoom: true,
-      });
-      return result.barcodes
-        .map((barcode) => barcode.rawValue || barcode.displayValue || "")
-        .filter(Boolean);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "原生掃描取消或失敗";
-      // 使用者主動取消（返回鍵）不視為錯誤
-      if (/cancel/i.test(message) || /取消/.test(message)) {
-        setStatus("idle");
-        setMessage("已取消掃描");
-        return [];
-      }
-      setStatus("error");
-      setMessage(message);
-      return [];
-    }
-  }
-
   function canAcceptCameraScan(): boolean {
-    if (Date.now() < scanReadyAtRef.current) {
-      return false;
-    }
-
-    if (dataRef.current.scanMode === "manual" && !manualScanArmedRef.current) {
-      return false;
-    }
-
-    return true;
-  }
-
-  function armManualScan() {
-    if (isNativeApp()) {
-      void scanNativeOnce();
-      return;
-    }
-
-    manualScanArmedRef.current = true;
-    setStatus("scanning");
-    setMessage("請對準 QRCode，準備掃一次");
-  }
-
-  async function scanNativeOnce() {
-    setStatus("scanning");
-    setMessage("請對準 QRCode，準備掃一次");
-    const texts = await scanWithNativeUi();
-    if (texts.length) {
-      await handleQrTexts(texts);
-    }
+    return Date.now() >= scanReadyAtRef.current;
   }
 
   function resolveExpiryDate(model: string, currentData: StoredAppData): string {
@@ -1504,7 +1441,7 @@ export function App() {
     }
   }
 
-  async function exportDateDirectly(dateToExport: string) {
+  function exportDateDirectly(dateToExport: string) {
     const targetFolder = data.folders[dateToExport];
     const targetRecords = targetFolder?.records ?? [];
     if (!targetRecords.length) {
@@ -1512,62 +1449,82 @@ export function App() {
       setMessage(`${dateToExport} 沒有任何電表資料可匯出`);
       return;
     }
-
-    const missing = incompleteCount(targetRecords);
-    if (missing > 0 && !window.confirm(`${dateToExport} 有 ${missing} 筆資料未填電號，仍要匯出嗎？`)) {
-      return;
-    }
-
-    try {
-      const result = await exportRecords(targetRecords, dateToExport, dataRef.current.districtCode);
-      setStatus("done");
-      setMessage(`已匯出 ${dateToExport} 的資料（${result.recordCount} 筆）`);
-    } catch (error) {
-      setStatus("error");
-      setMessage(error instanceof Error ? error.message : "匯出失敗");
-    }
+    setExportTarget({ type: "date", date: dateToExport });
   }
 
-  async function handleExportAll() {
+  function handleExportAll() {
     const hasAny = Object.values(data.folders).some((folder) => folder.records.length > 0);
     if (!hasAny) {
       setStatus("error");
       setMessage("沒有任何資料可匯出");
       return;
     }
-
-    const missing = Object.values(data.folders).reduce(
-      (sum, folder) => sum + incompleteCount(folder.records),
-      0,
-    );
-    if (missing > 0 && !window.confirm(`全部日期共 ${missing} 筆資料未填電號，仍要匯出嗎？`)) {
-      return;
-    }
-
-    try {
-      const recordsByDate: Record<string, MeterRecord[]> = {};
-      for (const [date, folder] of Object.entries(data.folders)) {
-        if (folder.records.length) {
-          recordsByDate[date] = folder.records;
-        }
-      }
-      const result = await exportAllDates(recordsByDate, folderDates, dataRef.current.districtCode);
-      setStatus("done");
-      setMessage(`已匯出全部日期（${result.recordCount} 筆）`);
-    } catch (error) {
-      setStatus("error");
-      setMessage(error instanceof Error ? error.message : "匯出全部失敗");
-    }
+    setExportTarget({ type: "all" });
   }
 
-  async function handleBackup() {
+  function handleBackup() {
+    setExportTarget({ type: "backup" });
+  }
+
+  async function executeExport(target: ExportTarget, mode: "share" | "download") {
+    setIsExporting(true);
     try {
-      const fileName = await exportBackup(dataRef.current);
-      setStatus("done");
-      setMessage(`已匯出 JSON 備份檔（${fileName}），請妥善保存`);
+      if (target.type === "date") {
+        const targetRecords = dataRef.current.folders[target.date]?.records ?? [];
+        const result = await exportRecords(targetRecords, target.date, dataRef.current.districtCode, mode);
+        setExportTarget(null);
+        if (result.delivery?.cancelled) {
+          setStatus("idle");
+          setMessage("已取消分享");
+          return;
+        }
+        setStatus("done");
+        if (result.delivery?.shared) {
+          setMessage(`已開啟分享面板（${target.date}，共 ${result.recordCount} 筆）`);
+        } else {
+          setMessage(`已匯出 ${target.date} 的資料（${result.recordCount} 筆）`);
+        }
+      } else if (target.type === "all") {
+        const recordsByDate: Record<string, MeterRecord[]> = {};
+        for (const [date, folder] of Object.entries(dataRef.current.folders)) {
+          if (folder.records.length) {
+            recordsByDate[date] = folder.records;
+          }
+        }
+        const result = await exportAllDates(recordsByDate, folderDates, dataRef.current.districtCode, mode);
+        setExportTarget(null);
+        if (result.delivery?.cancelled) {
+          setStatus("idle");
+          setMessage("已取消分享");
+          return;
+        }
+        setStatus("done");
+        if (result.delivery?.shared) {
+          setMessage(`已開啟分享面板（全部日期共 ${result.recordCount} 筆）`);
+        } else {
+          setMessage(`已匯出全部日期（${result.recordCount} 筆）`);
+        }
+      } else if (target.type === "backup") {
+        const result = await exportBackup(dataRef.current, mode);
+        setExportTarget(null);
+        if (result.cancelled) {
+          setStatus("idle");
+          setMessage("已取消分享");
+          return;
+        }
+        setStatus("done");
+        if (result.shared) {
+          setMessage(`已開啟備份分享（${result.fileName}）`);
+        } else {
+          setMessage(`已下載備份檔（${result.fileName}），請妥善保存`);
+        }
+      }
     } catch (error) {
+      setExportTarget(null);
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "備份失敗");
+      setMessage(error instanceof Error ? error.message : "匯出失敗");
+    } finally {
+      setIsExporting(false);
     }
   }
 
@@ -1665,13 +1622,6 @@ export function App() {
 
   function setDistrictCode(code: string) {
     updateData((current) => ({ ...current, districtCode: code.replace(/\D/g, "").slice(0, 2) }));
-  }
-
-  function setScanMode(scanMode: StoredAppData["scanMode"]) {
-    manualScanArmedRef.current = false;
-    updateData((current) => ({ ...current, scanMode }));
-    setStatus("done");
-    setMessage(scanMode === "auto" ? "自動連續掃描已啟用" : "手動模式：按「掃一次」才會讀取");
   }
 
   function setScanInterval(scanIntervalMs: number) {
@@ -1977,12 +1927,6 @@ export function App() {
               </div>
             ) : null}
 
-            {!isNativeApp() && cameraActive && data.scanMode === "manual" ? (
-              <button className="primary-button scan-once-button" type="button" onClick={armManualScan}>
-                掃一次
-              </button>
-            ) : null}
-
             {/* 核心掃描控制卡片 */}
             <div className="hero-scan-card">
               {cameraActive ? (
@@ -2001,13 +1945,9 @@ export function App() {
                 >
                   <Camera size={26} />
                   <div className="hero-scan-text">
-                    <span className="hero-title">
-                      {data.scanMode === "auto" ? "開始連續掃描" : "開始單次掃描"}
-                    </span>
+                    <span className="hero-title">開始連續掃描</span>
                     <span className="hero-subtitle">
-                      {data.scanMode === "auto"
-                        ? `自動比對雙QR・間隔 ${data.scanIntervalMs / 1000}秒`
-                        : "單次讀取後提示輸入"}
+                      {`自動比對雙QR・間隔 ${data.scanIntervalMs / 1000}秒`}
                     </span>
                   </div>
                 </button>
@@ -2030,25 +1970,14 @@ export function App() {
               </div>
 
               <div className="scan-quick-card">
-                <div className="quick-mode-strip">
-                  <label className="pref-pill-label">
-                    <input
-                      checked={data.scanMode === "auto"}
-                      disabled={cameraActive}
-                      type="checkbox"
-                      onChange={(event) => setScanMode(event.target.checked ? "auto" : "manual")}
-                    />
-                    <span className="mode-text">
-                      {data.scanMode === "auto" ? "連續掃描 (自動連續刷)" : "單次掃描 (讀完即停)"}
-                    </span>
-                  </label>
-
-                  {targetMeter ? (
+                {targetMeter ? (
+                  <div className="quick-mode-strip">
+                    <span className="pref-pill-label">鎖定中：{targetMeter}</span>
                     <button type="button" className="link-btn text-danger reset-btn-pill" onClick={resetTargetMeter}>
-                      <RefreshCw size={12} /> 換表 ({targetMeter})
+                      <RefreshCw size={12} /> 換表
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
 
                 <div className="quick-setting-row">
                   <label className="pref-pill-label">
@@ -2405,6 +2334,11 @@ export function App() {
                 <span>報表資料匯出 (Excel)</span>
               </div>
 
+              <div className="settings-tip-banner">
+                <Share2 size={16} />
+                <span>手機提示：點擊匯出後選擇「分享」，即可直接儲存至「Google 雲端硬碟」或傳送至 LINE！</span>
+              </div>
+
               {/* 項目 1: 一鍵匯出今日資料 (最直覺快捷) */}
               <div className="settings-item highlight-export">
                 <div className="settings-item-info">
@@ -2559,22 +2493,6 @@ export function App() {
               <div className="settings-card-header">
                 <SlidersHorizontal size={16} />
                 <span>掃描偏好設定</span>
-              </div>
-              <div className="settings-item">
-                <div className="settings-item-info">
-                  <span className="settings-item-title">連續掃描模式</span>
-                  <span className="settings-item-desc">自動連續讀取並比對雙 QR，免每次手動重開相機</span>
-                </div>
-                <div className="settings-item-action">
-                  <label className="switch-toggle">
-                    <input
-                      checked={data.scanMode === "auto"}
-                      type="checkbox"
-                      onChange={(e) => setScanMode(e.target.checked ? "auto" : "manual")}
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
               </div>
 
               <div className="settings-item">
@@ -3029,6 +2947,150 @@ export function App() {
               <Square size={18} />
               停止掃描
             </button>
+          </div>
+        ) : null}
+
+        {/* 匯出選項彈窗 (分享至 Google 雲端硬碟 / 下載至本機) */}
+        {exportTarget ? (
+          <div className="completion-overlay" onClick={() => !isExporting && setExportTarget(null)}>
+            <section
+              className="export-dialog-card"
+              role="dialog"
+              aria-modal="true"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="export-dialog-header">
+                <div>
+                  <h3>
+                    {exportTarget.type === "backup"
+                      ? "匯出 JSON 備份檔"
+                      : exportTarget.type === "all"
+                      ? "匯出全部歷史報表 (Excel)"
+                      : `匯出 ${exportTarget.date} 報表 (Excel)`}
+                  </h3>
+                  <span className="export-dialog-subtitle">請選擇儲存或分享方式</span>
+                </div>
+                <button
+                  type="button"
+                  className="dialog-close-btn"
+                  title="關閉"
+                  disabled={isExporting}
+                  onClick={() => setExportTarget(null)}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {exportTarget.type === "date" && (() => {
+                const recs = data.folders[exportTarget.date]?.records ?? [];
+                const missing = incompleteCount(recs);
+                return (
+                  <div className="export-summary-box">
+                    <div className="export-summary-row">
+                      <span className="export-summary-label">匯出日期</span>
+                      <span className="export-summary-val">{exportTarget.date}</span>
+                    </div>
+                    <div className="export-summary-row">
+                      <span className="export-summary-label">總筆數</span>
+                      <span className="export-summary-val">{recs.length} 筆（已填電號 {recs.length - missing} 筆）</span>
+                    </div>
+                    {missing > 0 ? (
+                      <div className="export-summary-warning">
+                        ⚠️ 尚有 <strong>{missing}</strong> 筆資料未填電號，仍可照常匯出
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })()}
+
+              {exportTarget.type === "all" && (() => {
+                const total = totalAllRecordsCount;
+                const missing = Object.values(data.folders).reduce(
+                  (sum, folder) => sum + incompleteCount(folder.records),
+                  0,
+                );
+                return (
+                  <div className="export-summary-box">
+                    <div className="export-summary-row">
+                      <span className="export-summary-label">涵蓋日期</span>
+                      <span className="export-summary-val">全部日期（共 {folderDates.length} 個工作日）</span>
+                    </div>
+                    <div className="export-summary-row">
+                      <span className="export-summary-label">總筆數</span>
+                      <span className="export-summary-val">{total} 筆（已填電號 {total - missing} 筆）</span>
+                    </div>
+                    {missing > 0 ? (
+                      <div className="export-summary-warning">
+                        ⚠️ 全部日期中共有 <strong>{missing}</strong> 筆未填電號，仍可照常匯出
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })()}
+
+              {exportTarget.type === "backup" && (
+                <div className="export-summary-box">
+                  <div className="export-summary-row">
+                    <span className="export-summary-label">備份項目</span>
+                    <span className="export-summary-val">完整系統資料庫（含所有日期電表與偏好設定）</span>
+                  </div>
+                  <div className="export-summary-row">
+                    <span className="export-summary-label">總筆數</span>
+                    <span className="export-summary-val">{totalAllRecordsCount} 筆電表資料</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="export-actions-list">
+                <button
+                  type="button"
+                  className="export-option-btn primary-share"
+                  disabled={isExporting}
+                  onClick={() => void executeExport(exportTarget, "share")}
+                >
+                  <div className="export-option-icon share-icon">
+                    {isExporting ? <Loader2 size={24} className="spin" /> : <Share2 size={24} />}
+                  </div>
+                  <div className="export-option-info">
+                    <div className="export-option-title-row">
+                      <span className="export-option-title">分享 / 儲存至 Google 雲端硬碟</span>
+                      <span className="export-option-badge">{isShareSupported ? "手機推薦" : "雲端推薦"}</span>
+                    </div>
+                    <span className="export-option-desc">
+                      叫出手機系統原生分享選單，可直接儲存至「Google 雲端硬碟」、傳送至 LINE 或寄送 Email
+                    </span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  className="export-option-btn secondary-download"
+                  disabled={isExporting}
+                  onClick={() => void executeExport(exportTarget, "download")}
+                >
+                  <div className="export-option-icon download-icon">
+                    <Download size={24} />
+                  </div>
+                  <div className="export-option-info">
+                    <span className="export-option-title">直接下載至手機 / 本機</span>
+                    <span className="export-option-desc">
+                      儲存檔案至手機或電腦的「下載 (Downloads)」資料夾
+                    </span>
+                  </div>
+                </button>
+              </div>
+
+              <div className="export-dialog-footer">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={isExporting}
+                  onClick={() => setExportTarget(null)}
+                >
+                  取消
+                </button>
+              </div>
+            </section>
           </div>
         ) : null}
       </section>

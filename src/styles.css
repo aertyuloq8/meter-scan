@@ -2682,3 +2682,207 @@ select {
   background: #cfe3cd;
 }
 
+/* ================= 匯出選擇彈窗 (Export Dialog) ================= */
+
+.export-dialog-card {
+  background: #ffffff;
+  border-radius: 18px;
+  width: 94%;
+  max-width: 420px;
+  padding: 20px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: popIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.export-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid #edf1eb;
+  padding-bottom: 12px;
+}
+
+.export-dialog-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: #17201a;
+  letter-spacing: -0.3px;
+}
+
+.export-dialog-subtitle {
+  font-size: 13px;
+  color: #556858;
+  margin-top: 2px;
+  display: block;
+}
+
+.export-summary-box {
+  background: #f4f8f3;
+  border: 1px solid #d9e5d6;
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.export-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.export-summary-label {
+  color: #5b6e5d;
+  font-weight: 600;
+}
+
+.export-summary-val {
+  color: #1a2a1e;
+  font-weight: 700;
+}
+
+.export-summary-warning {
+  margin-top: 4px;
+  padding: 6px 10px;
+  background: #fff8e6;
+  border: 1px solid #f6d289;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #925402;
+  line-height: 1.4;
+}
+
+.export-actions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.export-option-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1.5px solid transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: #ffffff;
+}
+
+.export-option-btn.primary-share {
+  background: linear-gradient(135deg, #f0fdf4 0%, #e6f7ec 100%);
+  border-color: #7dd39f;
+  box-shadow: 0 4px 14px rgba(27, 107, 68, 0.08);
+}
+
+.export-option-btn.primary-share:hover:not(:disabled) {
+  border-color: #2e8b57;
+  background: #e2f5e8;
+  transform: translateY(-1px);
+}
+
+.export-option-btn.primary-share:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.export-option-btn.secondary-download {
+  background: #f7faf6;
+  border-color: #d1ded0;
+}
+
+.export-option-btn.secondary-download:hover:not(:disabled) {
+  background: #eef4ed;
+  border-color: #b5c7b3;
+  transform: translateY(-1px);
+}
+
+.export-option-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.export-option-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.export-option-icon.share-icon {
+  background: #1b6b44;
+  color: #ffffff;
+}
+
+.export-option-icon.download-icon {
+  background: #e4ebe2;
+  color: #3b503e;
+}
+
+.export-option-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.export-option-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-option-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #17241a;
+}
+
+.export-option-badge {
+  font-size: 11px;
+  font-weight: 700;
+  background: #2e8b57;
+  color: #ffffff;
+  padding: 2px 7px;
+  border-radius: 20px;
+  line-height: 1.2;
+}
+
+.export-option-desc {
+  font-size: 12px;
+  color: #5a6e5e;
+  line-height: 1.35;
+}
+
+.export-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.settings-tip-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #eef7f0;
+  border: 1px solid #c7e5cf;
+  color: #1f6f46;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 12px;
+}
+
+
