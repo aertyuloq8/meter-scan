@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
+  AlertTriangle,
   Camera,
+  CheckCircle2,
   ChevronRight,
   ClipboardPlus,
   Cloud,
@@ -26,6 +28,7 @@ import {
   Trash2,
   Upload,
   X,
+  XCircle,
   Zap,
   ZapOff,
 } from "lucide-react";
@@ -42,6 +45,7 @@ import {
   type ExportDeliveryMode,
 } from "./exportExcel";
 import {
+  clearDriveAccessToken,
   handleDriveOAuthRedirect,
   listDriveBackups,
   downloadDriveFile,
@@ -87,6 +91,15 @@ type ExportTarget =
   | { type: "all" }
   | { type: "backup" };
 
+interface NoticeModalData {
+  type?: "success" | "info" | "warning" | "error";
+  title: string;
+  message: string;
+  details?: Array<{ label: string; value: string }>;
+  confirmText?: string;
+  onConfirm?: () => void;
+}
+
 export function App() {
   const [data, setData] = useState<StoredAppData>(() => loadData());
   const [activeTab, setActiveTab] = useState<ActiveTab>("scan");
@@ -116,6 +129,7 @@ export function App() {
     selectedIds: string[];
   } | null>(null);
   const [isDriveBusy, setIsDriveBusy] = useState(false);
+  const [noticeModal, setNoticeModal] = useState<NoticeModalData | null>(null);
   const isShareSupported = useMemo(() => canBrowserShareFiles() || isNativeApp(), []);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1497,6 +1511,9 @@ export function App() {
   }
 
   async function executeExport(target: ExportTarget, mode: ExportDeliveryMode) {
+    if (mode === "drive" || mode === "both") {
+      clearDriveAccessToken();
+    }
     setIsExporting(true);
     setDriveProgress(
       mode === "drive" || mode === "both"
@@ -1521,22 +1538,67 @@ export function App() {
           onProgress,
         );
         setExportTarget(null);
+
         if (result.delivery?.cancelled) {
           setStatus("idle");
           setMessage("已取消分享");
           return;
         }
+
         setStatus("done");
         if (result.delivery?.uploadedToDrive) {
-          const bothText = result.delivery.downloaded ? "，本機檔案亦同步下載完畢" : "";
+          const bothText = result.delivery.downloaded ? "，本機檔案亦同步下載至「下載」資料夾" : "";
           setMessage(`✅ Excel 報表已成功上傳至個人 Google 雲端硬碟！${bothText}`);
+          setNoticeModal({
+            type: "success",
+            title: mode === "both" ? "雙重保存完成" : "雲端硬碟儲存成功",
+            message: mode === "both"
+              ? "報表已成功上傳至您的個人 Google 雲端硬碟，且本機下載檔案亦已儲存完畢！"
+              : "報表已成功直接上傳至您選取的個人 Google 雲端硬碟！",
+            details: [
+              { label: "報表日期", value: target.date },
+              { label: "檔案名稱", value: result.fileName },
+              { label: "資料筆數", value: `${result.recordCount} 筆` },
+              { label: "儲存位置", value: mode === "both" ? "Google 雲端硬碟 + 手機本機下載" : "個人 Google 雲端硬碟 (根目錄)" },
+            ],
+          });
         } else if (result.delivery?.shared) {
-          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式）" : "";
-          setMessage(`已開啟分享選單！${fmtText}`);
+          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式）" : "（Excel 活頁簿）";
+          setMessage(`已開啟手機系統分享選單！${fmtText}`);
+          setNoticeModal({
+            type: "success",
+            title: "已開啟系統分享",
+            message: "已成功喚醒手機原生分享選單！\n您可選擇直接傳送至 LINE 好友、群組、Gmail 或其他通訊軟體。",
+            details: [
+              { label: "報表日期", value: target.date },
+              { label: "檔案名稱", value: result.fileName },
+              { label: "資料筆數", value: `${result.recordCount} 筆` },
+              { label: "分享格式", value: fmtText },
+            ],
+          });
         } else if (result.delivery?.unsupported) {
-          setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您自動下載 Excel 檔至本機（${result.recordCount} 筆）`);
+          setMessage(`目前瀏覽器不支援直接呼叫分享面板，請改用儲存至雲端或下載（${result.recordCount} 筆）`);
+          setNoticeModal({
+            type: "warning",
+            title: "瀏覽器不支援原生分享",
+            message: "目前使用的瀏覽器環境不支援直接喚醒手機系統分享選單。\n\n💡 建議：\n1. 請改用手機 Chrome 或 Safari 開啟本系統。\n2. 或在匯出選項中點選「儲存至 Google 雲端硬碟」或「直接下載至本機」。",
+            details: [
+              { label: "檔案名稱", value: result.fileName },
+              { label: "資料筆數", value: `${result.recordCount} 筆` },
+            ],
+          });
         } else {
           setMessage(`已下載 ${target.date} 的資料（${result.recordCount} 筆）`);
+          setNoticeModal({
+            type: "success",
+            title: "檔案下載完成",
+            message: "報表已成功下載至您裝置的「下載」資料夾，可隨時使用 Excel 開啟。",
+            details: [
+              { label: "報表日期", value: target.date },
+              { label: "檔案名稱", value: result.fileName },
+              { label: "資料筆數", value: `${result.recordCount} 筆` },
+            ],
+          });
         }
       } else if (target.type === "all") {
         const recordsByDate: Record<string, MeterRecord[]> = {};
@@ -1553,47 +1615,142 @@ export function App() {
           onProgress,
         );
         setExportTarget(null);
+
         if (result.delivery?.cancelled) {
           setStatus("idle");
           setMessage("已取消分享");
           return;
         }
+
         setStatus("done");
         if (result.delivery?.uploadedToDrive) {
-          const bothText = result.delivery.downloaded ? "，本機檔案亦同步下載完畢" : "";
+          const bothText = result.delivery.downloaded ? "，本機檔案亦同步下載至「下載」資料夾" : "";
           setMessage(`✅ 全部歷史報表已成功上傳至個人 Google 雲端硬碟！${bothText}`);
+          setNoticeModal({
+            type: "success",
+            title: mode === "both" ? "雙重保存完成" : "雲端硬碟儲存成功",
+            message: mode === "both"
+              ? "全部日期歷史報表已成功上傳至您的個人 Google 雲端硬碟，且本機下載檔案亦已儲存完畢！"
+              : "全部日期歷史報表已成功直接上傳至您選取的個人 Google 雲端硬碟！",
+            details: [
+              { label: "匯出範圍", value: `全部歷史紀錄（${folderDates.length} 個工作日）` },
+              { label: "檔案名稱", value: result.fileName },
+              { label: "總筆數", value: `${result.recordCount} 筆` },
+              { label: "儲存位置", value: mode === "both" ? "Google 雲端硬碟 + 手機本機下載" : "個人 Google 雲端硬碟 (根目錄)" },
+            ],
+          });
         } else if (result.delivery?.shared) {
-          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式）" : "";
-          setMessage(`已開啟分享選單！${fmtText}`);
+          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式）" : "（Excel 活頁簿）";
+          setMessage(`已開啟手機系統分享選單！${fmtText}`);
+          setNoticeModal({
+            type: "success",
+            title: "已開啟系統分享",
+            message: "已成功喚醒手機原生分享選單！\n您可選擇直接傳送至 LINE 好友、群組、Gmail 或其他通訊軟體。",
+            details: [
+              { label: "檔案名稱", value: result.fileName },
+              { label: "總筆數", value: `${result.recordCount} 筆` },
+              { label: "分享格式", value: fmtText },
+            ],
+          });
         } else if (result.delivery?.unsupported) {
-          setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您自動下載 Excel 檔至本機（全部日期共 ${result.recordCount} 筆）`);
+          setMessage(`目前瀏覽器不支援直接呼叫分享面板，請改用儲存至雲端或下載（共 ${result.recordCount} 筆）`);
+          setNoticeModal({
+            type: "warning",
+            title: "瀏覽器不支援原生分享",
+            message: "目前使用的瀏覽器環境不支援直接喚醒手機系統分享選單。\n\n💡 建議：\n1. 請改用手機 Chrome 或 Safari 開啟本系統。\n2. 或在匯出選項中點選「儲存至 Google 雲端硬碟」或「直接下載至本機」。",
+            details: [
+              { label: "檔案名稱", value: result.fileName },
+              { label: "總筆數", value: `${result.recordCount} 筆` },
+            ],
+          });
         } else {
           setMessage(`已下載全部日期的資料（共 ${result.recordCount} 筆）`);
+          setNoticeModal({
+            type: "success",
+            title: "全部報表下載完成",
+            message: "全部日期之歷史報表已成功下載至您裝置的「下載」資料夾。",
+            details: [
+              { label: "工作日數", value: `${folderDates.length} 個工作日` },
+              { label: "檔案名稱", value: result.fileName },
+              { label: "總筆數", value: `${result.recordCount} 筆` },
+            ],
+          });
         }
       } else if (target.type === "backup") {
         const result = await exportBackup(dataRef.current, mode, onProgress);
         setExportTarget(null);
+
         if (result.cancelled) {
           setStatus("idle");
           setMessage("已取消分享");
           return;
         }
+
         setStatus("done");
         if (result.uploadedToDrive) {
-          const bothText = result.downloaded ? "，本機備份檔亦同步下載" : "";
+          const bothText = result.downloaded ? "，本機備份檔亦同步下載至「下載」資料夾" : "";
           setMessage(`✅ 完整備份檔已成功上傳至個人 Google 雲端硬碟！${bothText}`);
+          const totalRecords = Object.values(dataRef.current.folders).reduce((s, f) => s + f.records.length, 0);
+          setNoticeModal({
+            type: "success",
+            title: mode === "both" ? "雙重保存備份完成" : "Google 雲端備份成功",
+            message: mode === "both"
+              ? "系統資料庫完整備份檔已上傳至 Google 雲端硬碟，且本機備份檔亦下載完畢！"
+              : "系統資料庫完整備份檔已成功上傳至您選取的個人 Google 雲端硬碟！",
+            details: [
+              { label: "備份檔名", value: result.fileName },
+              { label: "涵蓋工作日", value: `${Object.keys(dataRef.current.folders).length} 個` },
+              { label: "總電表數", value: `${totalRecords} 筆` },
+              { label: "儲存位置", value: mode === "both" ? "Google 雲端硬碟 + 手機本機下載" : "個人 Google 雲端硬碟 (根目錄)" },
+            ],
+          });
         } else if (result.shared) {
           setMessage(`已開啟備份分享面板（${result.fileName}，可儲存至 Google 雲端硬碟或 LINE）`);
+          setNoticeModal({
+            type: "success",
+            title: "已開啟系統分享",
+            message: "已成功開啟手機系統原生分享選單！\n您可選擇傳送備份檔至 LINE 好友、Gmail 或 Google 雲端硬碟。",
+            details: [
+              { label: "備份檔名", value: result.fileName },
+            ],
+          });
         } else if (result.unsupported) {
           setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您下載備份檔（${result.fileName}）`);
+          setNoticeModal({
+            type: "warning",
+            title: "瀏覽器不支援原生分享",
+            message: "目前使用的瀏覽器環境不支援直接喚醒手機系統分享選單。\n\n💡 建議：\n1. 請改用手機 Chrome 或 Safari 開啟本系統。\n2. 或在匯出選項中點選「儲存至 Google 雲端硬碟」或「直接下載至本機」。",
+            details: [
+              { label: "備份檔名", value: result.fileName },
+            ],
+          });
         } else {
           setMessage(`已下載備份檔（${result.fileName}），請妥善保存`);
+          setNoticeModal({
+            type: "success",
+            title: "備份檔下載完成",
+            message: "系統完整備份檔 (.json) 已下載至您裝置的「下載」資料夾，請妥善保存。",
+            details: [
+              { label: "備份檔名", value: result.fileName },
+            ],
+          });
         }
       }
     } catch (error) {
       setExportTarget(null);
-      setStatus("error");
-      setMessage(error instanceof Error ? error.message : "匯出失敗");
+      const errMsg = error instanceof Error ? error.message : "匯出失敗";
+      if (errMsg.includes("已取消") || errMsg.includes("closed")) {
+        setStatus("idle");
+        setMessage("已取消 Google 登入");
+      } else {
+        setStatus("error");
+        setMessage(errMsg);
+        setNoticeModal({
+          type: "error",
+          title: "匯出/儲存失敗",
+          message: errMsg,
+        });
+      }
     } finally {
       setIsExporting(false);
       setTimeout(() => setDriveProgress(null), 1500);
@@ -1601,6 +1758,7 @@ export function App() {
   }
 
   async function handleDriveBackup() {
+    clearDriveAccessToken();
     setIsDriveBusy(true);
     setDriveProgress({ percent: 10, text: "正在連接 Google 雲端硬碟…" });
     try {
@@ -1613,9 +1771,32 @@ export function App() {
       setDriveProgress({ percent: 100, text: "完成" });
       setStatus("done");
       setMessage(`✅ 系統資料庫已成功備份至個人 Google 雲端硬碟（${result.fileName}）`);
+      const totalRecords = Object.values(dataRef.current.folders).reduce((s, f) => s + f.records.length, 0);
+      setNoticeModal({
+        type: "success",
+        title: "Google 雲端備份成功",
+        message: "您的系統資料庫已成功直接備份至個人 Google 雲端硬碟！",
+        details: [
+          { label: "備份檔名", value: result.fileName },
+          { label: "工作日數", value: `${Object.keys(dataRef.current.folders).length} 個工作日` },
+          { label: "電表總數", value: `${totalRecords} 筆` },
+          { label: "儲存位置", value: "個人 Google 雲端硬碟 (根目錄)" },
+        ],
+      });
     } catch (error) {
-      setStatus("error");
-      setMessage(error instanceof Error ? error.message : "雲端備份失敗");
+      const errMsg = error instanceof Error ? error.message : "雲端備份失敗";
+      if (errMsg.includes("已取消") || errMsg.includes("closed")) {
+        setStatus("idle");
+        setMessage("已取消 Google 登入");
+      } else {
+        setStatus("error");
+        setMessage(errMsg);
+        setNoticeModal({
+          type: "error",
+          title: "雲端備份失敗",
+          message: errMsg,
+        });
+      }
     } finally {
       setIsDriveBusy(false);
       setTimeout(() => setDriveProgress(null), 2000);
@@ -1623,6 +1804,7 @@ export function App() {
   }
 
   async function handleDriveRestoreList() {
+    clearDriveAccessToken();
     setIsDriveBusy(true);
     setDriveProgress({ percent: 20, text: "正在查詢雲端硬碟備份清單…" });
     try {
@@ -1630,6 +1812,11 @@ export function App() {
       if (!files.length) {
         setStatus("idle");
         setMessage("您的 Google 雲端硬碟中找不到任何電表備份檔案");
+        setNoticeModal({
+          type: "info",
+          title: "未找到雲端備份檔案",
+          message: "在此 Google 帳號的個人雲端硬碟中，找不到任何含有「電表」關鍵字的備份或 Excel 檔案。\n\n💡 提示：若您的備份存於其他 Google 帳號，請再次點選「從 Google Drive 還原」並選取正確的 Google 帳號。",
+        });
         return;
       }
       setDriveModal({
@@ -1638,8 +1825,19 @@ export function App() {
         selectedIds: [files[0].id],
       });
     } catch (error) {
-      setStatus("error");
-      setMessage(error instanceof Error ? error.message : "讀取雲端備份清單失敗");
+      const errMsg = error instanceof Error ? error.message : "讀取雲端備份清單失敗";
+      if (errMsg.includes("已取消") || errMsg.includes("closed")) {
+        setStatus("idle");
+        setMessage("已取消 Google 登入");
+      } else {
+        setStatus("error");
+        setMessage(errMsg);
+        setNoticeModal({
+          type: "error",
+          title: "讀取雲端備份失敗",
+          message: errMsg,
+        });
+      }
     } finally {
       setIsDriveBusy(false);
       setDriveProgress(null);
@@ -1647,6 +1845,7 @@ export function App() {
   }
 
   async function handleDriveDeleteList() {
+    clearDriveAccessToken();
     setIsDriveBusy(true);
     setDriveProgress({ percent: 20, text: "正在查詢雲端硬碟備份清單…" });
     try {
@@ -1654,6 +1853,11 @@ export function App() {
       if (!files.length) {
         setStatus("idle");
         setMessage("您的 Google 雲端硬碟中目前沒有電表備份檔案");
+        setNoticeModal({
+          type: "info",
+          title: "無雲端備份檔案",
+          message: "在此 Google 帳號的雲端硬碟中，目前沒有可清理的電表備份檔案。",
+        });
         return;
       }
       setDriveModal({
@@ -1662,8 +1866,19 @@ export function App() {
         selectedIds: [],
       });
     } catch (error) {
-      setStatus("error");
-      setMessage(error instanceof Error ? error.message : "讀取雲端備份清單失敗");
+      const errMsg = error instanceof Error ? error.message : "讀取雲端備份清單失敗";
+      if (errMsg.includes("已取消") || errMsg.includes("closed")) {
+        setStatus("idle");
+        setMessage("已取消 Google 登入");
+      } else {
+        setStatus("error");
+        setMessage(errMsg);
+        setNoticeModal({
+          type: "error",
+          title: "讀取雲端備份失敗",
+          message: errMsg,
+        });
+      }
     } finally {
       setIsDriveBusy(false);
       setDriveProgress(null);
@@ -1695,6 +1910,7 @@ export function App() {
       });
       setDriveProgress({ percent: 85, text: "正在解析並還原資料庫…" });
 
+      let recordCountNotice = 0;
       if (/\.(xlsx|xls)$/i.test(targetFile.name)) {
         const file = new File([blob], targetFile.name);
         const importedFolders = await restoreFromExcel(file);
@@ -1715,19 +1931,38 @@ export function App() {
           }
           return { ...current, folders };
         });
+        recordCountNotice = Object.values(importedFolders).reduce((s, f) => s + f.records.length, 0);
       } else {
         const restored = await restoreFromDriveBlob(blob);
         setData(restored);
         dataRef.current = restored;
+        recordCountNotice = Object.values(restored.folders).reduce((s, f) => s + f.records.length, 0);
       }
 
       setDriveProgress({ percent: 100, text: "還原成功" });
       setDriveModal(null);
       setStatus("done");
       setMessage(`✅ 雲端備份「${targetFile.name}」已成功還原！`);
+      setNoticeModal({
+        type: "success",
+        title: "雲端還原成功",
+        message: `已成功從個人 Google 雲端硬碟下載並完整還原「${targetFile.name}」！\n所有電表資料已即時載入並更新至本機資料庫。`,
+        details: [
+          { label: "還原檔案", value: targetFile.name },
+          { label: "檔案大小", value: targetFile.size ? `${(targetFile.size / 1024).toFixed(1)} KB` : "未知" },
+          { label: "資料筆數", value: `共 ${recordCountNotice} 筆電表` },
+          { label: "目前狀態", value: "資料已同步生效" },
+        ],
+      });
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "雲端還原失敗");
+      const errMsg = error instanceof Error ? error.message : "雲端還原失敗";
+      setMessage(errMsg);
+      setNoticeModal({
+        type: "error",
+        title: "雲端還原失敗",
+        message: errMsg,
+      });
     } finally {
       setIsDriveBusy(false);
       setTimeout(() => setDriveProgress(null), 1500);
@@ -1764,9 +1999,25 @@ export function App() {
       setDriveModal(null);
       setStatus("done");
       setMessage(`✅ 已成功從 Google 雲端硬碟刪除 ${deleted} 個備份檔案`);
+      setNoticeModal({
+        type: "success",
+        title: "雲端備份刪除完成",
+        message: `已成功從個人 Google 雲端硬碟中安全刪除 ${deleted} 個備份檔案！\n\n本機資料庫完好無缺，不受任何影響。`,
+        details: [
+          { label: "已刪除數量", value: `${deleted} 個檔案` },
+          { label: "操作目標", value: "個人 Google 雲端硬碟" },
+          { label: "本機資料", value: "安全保留未變動" },
+        ],
+      });
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "刪除雲端備份失敗");
+      const errMsg = error instanceof Error ? error.message : "刪除雲端備份失敗";
+      setMessage(errMsg);
+      setNoticeModal({
+        type: "error",
+        title: "刪除雲端備份失敗",
+        message: errMsg,
+      });
     } finally {
       setIsDriveBusy(false);
       setTimeout(() => setDriveProgress(null), 1500);
@@ -3585,6 +3836,60 @@ export function App() {
                     {isDriveBusy ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />} 確定刪除所選
                   </button>
                 )}
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {/* 全域反饋提示彈窗 (NoticeModal) */}
+        {noticeModal ? (
+          <div className="completion-overlay" onClick={() => setNoticeModal(null)}>
+            <section
+              className="notice-modal-card"
+              role="dialog"
+              aria-modal="true"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="notice-modal-header">
+                <div className={`notice-modal-icon-badge ${noticeModal.type ?? "info"}`}>
+                  {noticeModal.type === "success" ? (
+                    <CheckCircle2 size={24} />
+                  ) : noticeModal.type === "error" ? (
+                    <XCircle size={24} />
+                  ) : noticeModal.type === "warning" ? (
+                    <AlertTriangle size={24} />
+                  ) : (
+                    <Info size={24} />
+                  )}
+                </div>
+                <h3 className="notice-modal-title">{noticeModal.title}</h3>
+              </div>
+
+              <div className="notice-modal-body">{noticeModal.message}</div>
+
+              {noticeModal.details && noticeModal.details.length > 0 ? (
+                <div className="notice-modal-details">
+                  {noticeModal.details.map((d, idx) => (
+                    <div key={idx} className="notice-modal-detail-row">
+                      <span className="notice-modal-detail-label">{d.label}</span>
+                      <span className="notice-modal-detail-val">{d.value}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="notice-modal-footer">
+                <button
+                  type="button"
+                  className="notice-modal-btn"
+                  onClick={() => {
+                    const action = noticeModal.onConfirm;
+                    setNoticeModal(null);
+                    if (action) action();
+                  }}
+                >
+                  {noticeModal.confirmText ?? "我知道了"}
+                </button>
               </div>
             </section>
           </div>

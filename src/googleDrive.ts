@@ -81,6 +81,7 @@ function getDriveTokenViaRedirect(clientId: string, resumeData?: unknown): Promi
     "&redirect_uri=" + redirectUri +
     "&response_type=token" +
     "&scope=" + encodeURIComponent(DRIVE_SCOPE) +
+    "&prompt=select_account" +
     "&state=" + state +
     "&include_granted_scopes=true";
 
@@ -130,16 +131,22 @@ export function handleDriveOAuthRedirect(onResume?: (resume: any) => void): bool
 
 /**
  * 取得 Google Drive 存取權杖（Access Token）
+ * 預設 reuseExisting 為 false：遵循使用者要求，每次點選雲端功能皆強制彈出 Google 帳號選擇視窗
  */
-export async function getDriveAccessToken(resumeData?: unknown): Promise<string> {
+export async function getDriveAccessToken(
+  resumeData?: unknown,
+  reuseExisting = false,
+): Promise<string> {
   const clientId = getDriveClientId();
   if (!clientId) {
     throw new Error("尚未設定 Google Client ID，無法連線雲端硬碟");
   }
 
-  if (inMemoryToken && tokenExpiresAt > Date.now() + 60000) {
+  if (reuseExisting && inMemoryToken && tokenExpiresAt > Date.now() + 60000) {
     return inMemoryToken;
   }
+
+  clearDriveAccessToken();
 
   if (isIOSDevice()) {
     return getDriveTokenViaRedirect(clientId, resumeData);
@@ -216,8 +223,12 @@ export async function getDriveAccessToken(resumeData?: unknown): Promise<string>
   });
 }
 
-export async function driveFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const token = await getDriveAccessToken();
+export async function driveFetch(
+  url: string,
+  options: RequestInit = {},
+  reuseExisting = true,
+): Promise<Response> {
+  const token = await getDriveAccessToken(undefined, reuseExisting);
   const resp = await fetch(url, {
     ...options,
     headers: {
@@ -333,7 +344,7 @@ export async function downloadDriveFile(
   fileId: string,
   onProgress?: (percent: number) => void,
 ): Promise<Blob> {
-  const token = await getDriveAccessToken();
+  const token = await getDriveAccessToken(undefined, true);
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("GET", `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);

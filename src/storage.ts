@@ -355,8 +355,69 @@ export async function exportBackup(
   }
 
   // 模式 C: 系統原生分享 (Web Share API)
-  if (mode === "share" || mode === "auto") {
-    // 步驟 1: 嘗試直接分享 .json
+  if (mode === "share") {
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      // 步驟 1: 嘗試直接分享 .json
+      const jsonFile = new File([blob], fileName, { type: mimeType });
+      if (canShareFile(jsonFile)) {
+        try {
+          await navigator.share({
+            title: "電表資料備份",
+            text: `電表資料備份：${fileName}`,
+            files: [jsonFile],
+          });
+          return { fileName, shared: true, downloaded: false };
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") {
+            return { fileName, shared: false, downloaded: false, cancelled: true };
+          }
+          console.warn("JSON 格式備份分享失敗：", error);
+        }
+      }
+
+      // 步驟 2: Android Chrome 阻擋 .json 檔案類型，但白名單允許 .txt 格式
+      const txtFileName = `電表資料備份_${timestampForName()}.txt`;
+      const txtFile = new File([blob], txtFileName, { type: "text/plain" });
+      if (canShareFile(txtFile)) {
+        try {
+          await navigator.share({
+            title: "電表資料備份",
+            text: `電表資料備份：${txtFileName}`,
+            files: [txtFile],
+          });
+          return { fileName: txtFileName, shared: true, downloaded: false };
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") {
+            return { fileName: txtFileName, shared: false, downloaded: false, cancelled: true };
+          }
+          console.warn("TXT 格式備份分享失敗，嘗試文字摘要分享：", error);
+        }
+      }
+
+      // 步驟 3: 若瀏覽器禁止實體檔案拋送，改以文字摘要呼叫分享面板
+      const totalCount = Object.values(data.folders).reduce(
+        (sum, folder) => sum + folder.records.length,
+        0,
+      );
+      const textSummary = `【電表系統資料庫備份】\n檔案名稱：${fileName}\n涵蓋日期：共 ${Object.keys(data.folders).length} 個\n電表總計：共 ${totalCount} 筆`;
+      try {
+        await navigator.share({
+          title: "電表系統資料庫備份",
+          text: textSummary,
+        });
+        return { fileName, shared: true, downloaded: false };
+      } catch (textError) {
+        if (textError instanceof Error && textError.name === "AbortError") {
+          return { fileName, shared: false, downloaded: false, cancelled: true };
+        }
+      }
+    }
+
+    return { fileName, shared: false, downloaded: false, unsupported: true };
+  }
+
+  // 模式 D: 自動（auto）在支援分享環境下嘗試分享
+  if (mode === "auto" && typeof navigator !== "undefined" && typeof navigator.share === "function") {
     const jsonFile = new File([blob], fileName, { type: mimeType });
     if (canShareFile(jsonFile)) {
       try {
@@ -366,36 +427,9 @@ export async function exportBackup(
           files: [jsonFile],
         });
         return { fileName, shared: true, downloaded: false };
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          return { fileName, shared: false, downloaded: false, cancelled: true };
-        }
-        console.warn("JSON 格式備份分享失敗：", error);
+      } catch {
+        // 略過，降級下載
       }
-    }
-
-    // 步驟 2: Android Chrome 阻擋 .json 檔案類型，但白名單允許 .txt 格式
-    const txtFileName = `電表資料備份_${timestampForName()}.txt`;
-    const txtFile = new File([blob], txtFileName, { type: "text/plain;charset=utf-8" });
-    if (canShareFile(txtFile)) {
-      try {
-        await navigator.share({
-          title: "電表資料備份",
-          text: `電表資料備份：${txtFileName}`,
-          files: [txtFile],
-        });
-        return { fileName: txtFileName, shared: true, downloaded: false };
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          return { fileName: txtFileName, shared: false, downloaded: false, cancelled: true };
-        }
-        console.warn("TXT 格式備份分享失敗：", error);
-      }
-    }
-
-    if (mode === "share") {
-      downloadBlob(blob, fileName);
-      return { fileName, shared: false, downloaded: true, unsupported: true };
     }
   }
 
