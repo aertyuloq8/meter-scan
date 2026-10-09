@@ -227,32 +227,62 @@ export async function driveFetch(
   url: string,
   options: RequestInit = {},
   reuseExisting = true,
+  maxRetries = 2,
 ): Promise<Response> {
-  const token = await getDriveAccessToken(undefined, reuseExisting);
-  const resp = await fetch(url, {
-    cache: "no-store",
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
-      Pragma: "no-cache",
-      Expires: "0",
-      ...(options.headers || {}),
-    },
-  });
+  let lastError: unknown = null;
 
-  if (!resp.ok) {
-    let detail = "";
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const json = await resp.json();
-      detail = json.error?.message || "";
-    } catch {
-      // ignore
+      const token = await getDriveAccessToken(undefined, reuseExisting);
+      const resp = await fetch(url, {
+        ...options,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(options.headers || {}),
+        },
+      });
+
+      if (!resp.ok) {
+        let detail = "";
+        try {
+          const json = await resp.json();
+          detail = json.error?.message || "";
+        } catch {
+          // ignore
+        }
+
+        // 若遇 503 (Service Unavailable)、500 或 429，依 Google 建議執行短暫延遲重試 (Exponential Backoff)
+        if ((resp.status === 503 || resp.status === 500 || resp.status === 429) && attempt < maxRetries) {
+          console.warn(
+            `Google Drive API 暫時忙碌 (${resp.status})${detail ? `：${detail}` : ""}，將在 ${600 * (attempt + 1)}ms 後重試第 ${attempt + 1} 次...`,
+          );
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+          continue;
+        }
+
+        throw new Error(`Google Drive 請求失敗 (${resp.status})` + (detail ? `：${detail}` : ""));
+      }
+
+      return resp;
+    } catch (err: unknown) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        attempt < maxRetries &&
+        (msg.includes("503") ||
+          msg.includes("NetworkError") ||
+          msg.includes("Failed to fetch") ||
+          msg.includes("Load failed"))
+      ) {
+        console.warn(`Google Drive 連線抖動，將在 ${600 * (attempt + 1)}ms 後重試...`, msg);
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        continue;
+      }
+      throw err;
     }
-    throw new Error(`Google Drive 請求失敗 (${resp.status})` + (detail ? `：${detail}` : ""));
   }
 
-  return resp;
+  throw lastError instanceof Error ? lastError : new Error("Google Drive 請求失敗，請稍後重試");
 }
 
 export interface DriveUploadedFile {
@@ -272,6 +302,11 @@ export function recordRecentDriveUpload(file: DriveFileInfo): void {
 export function recordRecentDriveDelete(fileId: string): void {
   recentUploadedFiles.delete(fileId);
   recentDeletedFileIds.add(fileId);
+}
+
+export function clearDriveSyncCache(): void {
+  recentUploadedFiles.clear();
+  recentDeletedFileIds.clear();
 }
 
 /**
@@ -358,12 +393,9 @@ export interface DriveFileInfo {
  */
 export async function listDriveBackups(keyword = "電表"): Promise<DriveFileInfo[]> {
   const query = encodeURIComponent(`name contains '${keyword}' and trashed = false`);
-  const nonce = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const resp = await driveFetch(
-    `https://www.googleapis.com/drive/v3/files?q=${query}&spaces=drive&orderBy=createdTime desc&pageSize=50&fields=files(id,name,size,createdTime,description)&_t=${nonce}`,
-    {
-      cache: "no-store",
-    },
+    `https://www.googleapis.com/drive/v3/files?q=${query}&orderBy=createdTime desc&pageSize=50&fields=files(id,name,size,createdTime,description)`,
+    {},
     true,
   );
   const data = (await resp.json()) as { files?: DriveFileInfo[] };
@@ -386,36 +418,59 @@ export async function listDriveBackups(keyword = "電表"): Promise<DriveFileInf
 }
 
 /**
- * 從 Google 雲端硬碟下載檔案 Blob
+ * 從 Google 雲端硬碟下載檔案 Blob（具備暫態錯誤重試保護）
  */
 export async function downloadDriveFile(
   fileId: string,
   onProgress?: (percent: number) => void,
+  maxRetries = 2,
 ): Promise<Blob> {
-  const token = await getDriveAccessToken(undefined, true);
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("GET", `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
-    xhr.responseType = "blob";
-    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const token = await getDriveAccessToken(undefined, true);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+        xhr.responseType = "blob";
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
-    xhr.onprogress = (event) => {
-      if (event.lengthComputable && onProgress) {
-        onProgress(Math.round((event.loaded / event.total) * 100));
+        xhr.onprogress = (event) => {
+          if (event.lengthComputable && onProgress) {
+            onProgress(Math.round((event.loaded / event.total) * 100));
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(xhr.response as Blob);
+          } else {
+            reject(new Error(`下載雲端檔案失敗 (${xhr.status})`));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error("下載雲端檔案連線失敗，請檢查網路連線"));
+        xhr.send();
+      });
+      return blob;
+    } catch (err: unknown) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        attempt < maxRetries &&
+        (msg.includes("503") ||
+          msg.includes("500") ||
+          msg.includes("連線失敗") ||
+          msg.includes("NetworkError"))
+      ) {
+        console.warn(`下載雲端檔案暫態異常，將在 ${600 * (attempt + 1)}ms 後重試...`, msg);
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        continue;
       }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(xhr.response as Blob);
-      } else {
-        reject(new Error(`下載雲端檔案失敗 (${xhr.status})`));
-      }
-    };
-
-    xhr.onerror = () => reject(new Error("下載雲端檔案連線失敗，請檢查網路連線"));
-    xhr.send();
-  });
+      throw err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("下載雲端檔案失敗，請稍後重試");
 }
 
 /**

@@ -48,6 +48,7 @@ import {
 } from "./exportExcel";
 import {
   clearDriveAccessToken,
+  clearDriveSyncCache,
   getDriveAccessToken,
   handleDriveOAuthRedirect,
   listDriveBackups,
@@ -2222,6 +2223,7 @@ export function App() {
   async function handleSwitchDriveAccount() {
     if (!driveModal) return;
     clearDriveAccessToken();
+    clearDriveSyncCache();
     setIsDriveBusy(true);
     setDriveProgress({ percent: 20, text: "正在選取 Google 帳號…" });
     try {
