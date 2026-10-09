@@ -1997,6 +1997,8 @@ select {
   flex-direction: column;
   gap: 14px;
   animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
 .pre-scan-header {
@@ -2084,6 +2086,187 @@ select {
 }
 
 .pre-scan-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.pre-scan-keypad-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pre-scan-display-strip {
+  background: #f1f8ee;
+  border: 1.5px solid #b7d6b0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pre-scan-display-strip:hover,
+.pre-scan-display-strip.active {
+  border-color: #2e7d32;
+  background: #eaf5e6;
+}
+
+.pre-scan-val-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pre-scan-val-text {
+  font-size: 18px;
+  font-weight: 800;
+  color: #1b5e20;
+  letter-spacing: 1px;
+}
+
+.pre-scan-val-text .placeholder {
+  font-size: 13px;
+  font-weight: 500;
+  color: #8fa08e;
+  letter-spacing: normal;
+}
+
+.pre-scan-edit-hint {
+  font-size: 11px;
+  font-weight: 700;
+  color: #2e7d32;
+  background: #ffffff;
+  border: 1px solid #c8dec3;
+  border-radius: 6px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.pre-scan-keypad-container {
+  margin: 6px 0;
+  animation: popIn 0.15s ease;
+}
+
+/* 現場掃描：快速設定顯示按鈕（大鍵盤模式） */
+.quick-ctrl-display-btn {
+  width: 100%;
+  height: 38px;
+  background: #ffffff;
+  border: 1.5px solid #b3c5af;
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1b5e20;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.quick-ctrl-display-btn:hover:not(:disabled) {
+  border-color: #2e7d32;
+  background: #f4fbf1;
+}
+
+.quick-ctrl-display-btn.placeholder {
+  color: #8fa08e;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.quick-ctrl-display-btn:disabled {
+  background: #f1f5f0;
+  border-color: #d1ded0;
+  color: #9cb09b;
+  cursor: not-allowed;
+}
+
+/* 現場掃描：快速設定自製大鍵盤抽屜 */
+.quick-keypad-sheet {
+  background: #ffffff;
+  border-radius: 20px;
+  width: 95%;
+  max-width: 390px;
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.quick-keypad-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #edf1eb;
+  padding-bottom: 8px;
+}
+
+.quick-keypad-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #1b5e20;
+}
+
+.quick-keypad-display-card {
+  background: #f1f8ee;
+  border: 1.5px solid #b7d6b0;
+  border-radius: 12px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quick-keypad-display-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2e7d32;
+  white-space: nowrap;
+}
+
+.quick-keypad-display-val {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  font-weight: 800;
+  color: #1b5e20;
+  letter-spacing: 1px;
+}
+
+.quick-keypad-display-val .placeholder {
+  font-size: 13px;
+  font-weight: 500;
+  color: #8fa08e;
+  letter-spacing: normal;
+}
+
+.quick-keypad-hint {
+  font-size: 12px;
+  color: #556858;
+  line-height: 1.4;
+  padding: 0 2px;
+}
+
+.quick-keypad-actions {
   display: grid;
   grid-template-columns: 1fr 1.6fr;
   gap: 10px;

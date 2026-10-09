@@ -81,7 +81,13 @@ import {
 } from "./storage";
 import { formatExpiryDate, formatServiceNumber, normalizeServiceNumberTo8Digits } from "./ocr";
 import { feedbackDuplicate, feedbackError, feedbackSuccess } from "./feedback";
-import { RecordCard, RecordEditSheet, ScanDebug, type SheetEditableField } from "./components";
+import {
+  LargeKeypad,
+  RecordCard,
+  RecordEditSheet,
+  ScanDebug,
+  type SheetEditableField,
+} from "./components";
 import type { MeterRecord, RecordEditDraft, Status, StoredAppData, StoredFolder } from "./types";
 import { APP_VERSION } from "./version";
 
@@ -156,6 +162,9 @@ export function App() {
   const [showPreScanExpiryModal, setShowPreScanExpiryModal] = useState(false);
   const [skipPreScanExpiryCheck, setSkipPreScanExpiryCheck] = useState(false);
   const [preScanExpiryDraft, setPreScanExpiryDraft] = useState("");
+  const [preScanKeypadOpen, setPreScanKeypadOpen] = useState(false);
+  const [quickKeypadField, setQuickKeypadField] = useState<"prefix" | "expiryDate" | "districtCode" | null>(null);
+  const [quickKeypadDraft, setQuickKeypadDraft] = useState("");
   const [selectedExportDate, setSelectedExportDate] = useState(today());
   const [scanEngine, setScanEngine] = useState<"native" | "mlkit" | "zxing" | null>(null);
   const [exportTarget, setExportTarget] = useState<ExportTarget | null>(null);
@@ -792,6 +801,49 @@ export function App() {
     });
   }
 
+  function openQuickKeypad(field: "prefix" | "expiryDate" | "districtCode") {
+    if (field === "prefix") {
+      setQuickKeypadDraft(data.servicePrefix || "");
+    } else if (field === "expiryDate") {
+      setQuickKeypadDraft(data.defaultExpiryDate || "");
+    } else if (field === "districtCode") {
+      setQuickKeypadDraft(data.districtCode || "");
+    }
+    setQuickKeypadField(field);
+  }
+
+  function commitQuickKeypad() {
+    if (!quickKeypadField) return;
+    if (quickKeypadField === "prefix") {
+      const clean = quickKeypadDraft.replace(/\D/g, "").slice(0, 4);
+      setPrefix(clean);
+      if (clean) {
+        setPrefixEnabled(true);
+      }
+      setMessage(clean ? `已設定固定前綴：${clean}` : "已清空固定前綴");
+    } else if (quickKeypadField === "expiryDate") {
+      const formatted = quickKeypadDraft ? formatExpiryDate(quickKeypadDraft) : "";
+      updateData((current) => {
+        const date = activeDateRef.current;
+        const latestModel = current.folders[date]?.records[0]?.model || "";
+        const nextMap = { ...current.modelExpiryMap };
+        if (latestModel && formatted) {
+          nextMap[latestModel] = formatted;
+        }
+        for (const key of Object.keys(nextMap)) {
+          if (!nextMap[key]) delete nextMap[key];
+        }
+        return { ...current, defaultExpiryDate: formatted, modelExpiryMap: nextMap };
+      });
+      setMessage(formatted ? `已設定預設檢定期限：${formatted}` : "已清除預設檢定期限");
+    } else if (quickKeypadField === "districtCode") {
+      const clean = quickKeypadDraft.replace(/\D/g, "").slice(0, 2);
+      setDistrictCode(clean);
+      setMessage(clean ? `已設定區處代碼：${clean}` : "已還原預設區處代碼");
+    }
+    setQuickKeypadField(null);
+  }
+
   function requestStartScan() {
     if (cameraActive) {
       stopCamera();
@@ -799,6 +851,7 @@ export function App() {
     }
     if (!skipPreScanExpiryCheck) {
       setPreScanExpiryDraft(data.defaultExpiryDate || "");
+      setPreScanKeypadOpen(false);
       setShowPreScanExpiryModal(true);
       return;
     }
@@ -2731,15 +2784,27 @@ export function App() {
                   </label>
                   <div className="quick-input-cell">
                     <div className="input-with-clear-wrap">
-                      <input
-                        className="quick-ctrl-input"
-                        disabled={!data.servicePrefixEnabled}
-                        inputMode="numeric"
-                        placeholder={data.servicePrefixEnabled ? "例如 40 或 10" : "點左側勾選啟用"}
-                        title="固定電號前綴"
-                        value={data.servicePrefix}
-                        onChange={(event) => setPrefix(event.target.value.replace(/\D/g, ""))}
-                      />
+                      {data.keypadMode === "large" ? (
+                        <button
+                          type="button"
+                          className={`quick-ctrl-display-btn ${!data.servicePrefix ? "placeholder" : ""}`}
+                          disabled={!data.servicePrefixEnabled}
+                          title="點此使用大鍵盤輸入前綴"
+                          onClick={() => openQuickKeypad("prefix")}
+                        >
+                          {data.servicePrefix || (data.servicePrefixEnabled ? "點此輸入" : "未啟用")}
+                        </button>
+                      ) : (
+                        <input
+                          className="quick-ctrl-input"
+                          disabled={!data.servicePrefixEnabled}
+                          inputMode="numeric"
+                          placeholder={data.servicePrefixEnabled ? "例如 40 或 10" : "點左側勾選啟用"}
+                          title="固定電號前綴"
+                          value={data.servicePrefix}
+                          onChange={(event) => setPrefix(event.target.value.replace(/\D/g, ""))}
+                        />
+                      )}
                       {data.servicePrefixEnabled && data.servicePrefix ? (
                         <button
                           type="button"
@@ -2761,15 +2826,26 @@ export function App() {
                   </div>
                   <div className="quick-input-cell">
                     <div className="input-with-clear-wrap">
-                      <input
-                        className="quick-ctrl-input"
-                        inputMode="numeric"
-                        placeholder="如 12512 或 125/12"
-                        title="當前檢定期限"
-                        value={data.defaultExpiryDate}
-                        onChange={(event) => handleQuickExpiryDraft(event.target.value)}
-                        onBlur={commitQuickExpiry}
-                      />
+                      {data.keypadMode === "large" ? (
+                        <button
+                          type="button"
+                          className={`quick-ctrl-display-btn ${!data.defaultExpiryDate ? "placeholder" : ""}`}
+                          title="點此使用大鍵盤輸入期限"
+                          onClick={() => openQuickKeypad("expiryDate")}
+                        >
+                          {data.defaultExpiryDate || "未設定 (可空白)"}
+                        </button>
+                      ) : (
+                        <input
+                          className="quick-ctrl-input"
+                          inputMode="numeric"
+                          placeholder="如 12512 或 125/12"
+                          title="當前檢定期限"
+                          value={data.defaultExpiryDate}
+                          onChange={(event) => handleQuickExpiryDraft(event.target.value)}
+                          onBlur={commitQuickExpiry}
+                        />
+                      )}
                       {data.defaultExpiryDate ? (
                         <button
                           type="button"
@@ -2791,15 +2867,26 @@ export function App() {
                   </div>
                   <div className="quick-input-cell">
                     <div className="input-with-clear-wrap">
-                      <input
-                        className="quick-ctrl-input"
-                        inputMode="numeric"
-                        maxLength={2}
-                        placeholder="10"
-                        title="區處代碼（預設 10 台南）"
-                        value={data.districtCode}
-                        onChange={(event) => setDistrictCode(event.target.value)}
-                      />
+                      {data.keypadMode === "large" ? (
+                        <button
+                          type="button"
+                          className={`quick-ctrl-display-btn ${!data.districtCode ? "placeholder" : ""}`}
+                          title="點此使用大鍵盤輸入區處代碼"
+                          onClick={() => openQuickKeypad("districtCode")}
+                        >
+                          {data.districtCode || "10 (預設)"}
+                        </button>
+                      ) : (
+                        <input
+                          className="quick-ctrl-input"
+                          inputMode="numeric"
+                          maxLength={2}
+                          placeholder="10"
+                          title="區處代碼（預設 10 台南）"
+                          value={data.districtCode}
+                          onChange={(event) => setDistrictCode(event.target.value)}
+                        />
+                      )}
                       {data.districtCode ? (
                         <button
                           type="button"
@@ -3644,9 +3731,16 @@ export function App() {
         ) : null}
 
         {/* 掃描前確認本次檢定期限彈窗 */}
+        {/* 掃描前確認本次檢定期限彈窗 */}
         {showPreScanExpiryModal ? (
-          <div className="completion-overlay">
-            <section className="pre-scan-modal" role="dialog" aria-modal="true" aria-labelledby="prescan-title">
+          <div className="completion-overlay" onClick={() => setShowPreScanExpiryModal(false)}>
+            <section
+              className="pre-scan-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="prescan-title"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="pre-scan-header">
                 <h3 id="prescan-title">確認本次檢定期限</h3>
                 <button
@@ -3664,34 +3758,82 @@ export function App() {
                   換批次或型式時，期限可能不同。請確認目前檢定期限是否正確：
                 </p>
 
-                <div className="pre-scan-input-card">
-                  <div className="pre-scan-input-row">
-                    <span className="pre-scan-label">檢定期限</span>
-                    <div className="input-with-clear-wrap">
-                      <input
-                        autoFocus
-                        className="pre-scan-input"
-                        inputMode="numeric"
-                        placeholder="如 12512 或 125/12"
-                        value={preScanExpiryDraft}
-                        onChange={(e) => setPreScanExpiryDraft(e.target.value)}
-                      />
-                      {preScanExpiryDraft ? (
-                        <button
-                          type="button"
-                          className="input-inline-clear-btn"
-                          title="清空"
-                          onClick={() => setPreScanExpiryDraft("")}
-                        >
-                          <X size={15} />
-                        </button>
-                      ) : null}
+                {data.keypadMode === "large" ? (
+                  <div className="pre-scan-keypad-flow">
+                    <div
+                      className={`pre-scan-display-strip ${preScanKeypadOpen ? "active" : ""}`}
+                      onClick={() => setPreScanKeypadOpen((prev) => !prev)}
+                    >
+                      <span className="pre-scan-label">檢定期限</span>
+                      <div className="pre-scan-val-row">
+                        <strong className="pre-scan-val-text">
+                          {preScanExpiryDraft || <span className="placeholder">未設定期限 (保持空白)</span>}
+                        </strong>
+                        <span className="pre-scan-edit-hint">
+                          {preScanKeypadOpen ? "收起大鍵盤" : "點此修改"}
+                        </span>
+                        {preScanExpiryDraft ? (
+                          <button
+                            type="button"
+                            className="input-inline-clear-btn"
+                            title="清空"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPreScanExpiryDraft("");
+                            }}
+                          >
+                            <X size={15} />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {preScanKeypadOpen ? (
+                      <div className="pre-scan-keypad-container">
+                        <LargeKeypad
+                          value={preScanExpiryDraft}
+                          maxLength={7}
+                          extras="slash"
+                          activeLabel="民國年月 (如 12512 或 125/12)"
+                          onChange={(val) => setPreScanExpiryDraft(val)}
+                          onClear={() => setPreScanExpiryDraft("")}
+                        />
+                      </div>
+                    ) : (
+                      <div className="pre-scan-hint">
+                        同型式電表將自動套用此期限；若本批次無特定期限可保持空白。
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="pre-scan-input-card">
+                    <div className="pre-scan-input-row">
+                      <span className="pre-scan-label">檢定期限</span>
+                      <div className="input-with-clear-wrap">
+                        <input
+                          className="pre-scan-input"
+                          inputMode="numeric"
+                          placeholder="如 12512 或 125/12"
+                          value={preScanExpiryDraft}
+                          onChange={(e) => setPreScanExpiryDraft(e.target.value)}
+                        />
+                        {preScanExpiryDraft ? (
+                          <button
+                            type="button"
+                            className="input-inline-clear-btn"
+                            title="清空"
+                            onClick={() => setPreScanExpiryDraft("")}
+                          >
+                            <X size={15} />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="pre-scan-hint">
+                      同型式電表將自動套用此期限；若本批次無特定期限可保持空白。
                     </div>
                   </div>
-                  <div className="pre-scan-hint">
-                    同型式電表將自動套用此期限；若本批次無特定期限可保持空白。
-                  </div>
-                </div>
+                )}
 
                 <label className="pre-scan-checkbox-label">
                   <input
@@ -3707,7 +3849,10 @@ export function App() {
                 <button
                   type="button"
                   className="secondary-button"
-                  onClick={() => setShowPreScanExpiryModal(false)}
+                  onClick={() => {
+                    setPreScanKeypadOpen(false);
+                    setShowPreScanExpiryModal(false);
+                  }}
                 >
                   取消
                 </button>
@@ -3716,15 +3861,123 @@ export function App() {
                   className="primary-button highlight-btn"
                   onClick={() => {
                     const formatted = preScanExpiryDraft ? formatExpiryDate(preScanExpiryDraft) : "";
-                    // 掃描前確認只設定本次預設期限；型式記憶等實際儲存該型式電表時再寫入
                     if (formatted !== data.defaultExpiryDate) {
                       updateData((current) => ({ ...current, defaultExpiryDate: formatted }));
                     }
+                    setPreScanKeypadOpen(false);
                     setShowPreScanExpiryModal(false);
                     void startCamera();
                   }}
                 >
                   確認並開始掃描
+                </button>
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {/* 現場掃描：快速設定自製大鍵盤抽屜 */}
+        {quickKeypadField ? (
+          <div className="completion-overlay" onClick={() => setQuickKeypadField(null)}>
+            <section
+              className="quick-keypad-sheet"
+              role="dialog"
+              aria-modal="true"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="quick-keypad-header">
+                <div className="quick-keypad-title">
+                  <SlidersHorizontal size={18} />
+                  <span>
+                    {quickKeypadField === "prefix"
+                      ? "設定固定電號前綴"
+                      : quickKeypadField === "expiryDate"
+                      ? "設定預設檢定期限"
+                      : "設定區處代碼"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="dialog-close-btn"
+                  title="關閉"
+                  onClick={() => setQuickKeypadField(null)}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="quick-keypad-display-card">
+                <span className="quick-keypad-display-label">
+                  {quickKeypadField === "prefix"
+                    ? "固定前綴"
+                    : quickKeypadField === "expiryDate"
+                    ? "檢定期限"
+                    : "區處代碼"}
+                </span>
+                <div className="quick-keypad-display-val">
+                  <strong>
+                    {quickKeypadDraft || (
+                      <span className="placeholder">
+                        {quickKeypadField === "prefix"
+                          ? "未設定前綴"
+                          : quickKeypadField === "expiryDate"
+                          ? "無特定期限（空白）"
+                          : "預設 10 (台南)"}
+                      </span>
+                    )}
+                  </strong>
+                  {quickKeypadDraft ? (
+                    <button
+                      type="button"
+                      className="input-inline-clear-btn"
+                      title="清除"
+                      onClick={() => setQuickKeypadDraft("")}
+                    >
+                      <X size={16} />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="quick-keypad-hint">
+                {quickKeypadField === "prefix"
+                  ? "配對電表後若續掃電號貼紙或手動輸入，將自動預填此前綴（例如 40 或 10）。"
+                  : quickKeypadField === "expiryDate"
+                  ? "輸入如 12512 或 125/12；同型式電表將自動套用此期限。"
+                  : "Excel 匯出時自動在 8 碼電號前補此 2 碼並計算第 11 碼檢查號。"}
+              </div>
+
+              <LargeKeypad
+                value={quickKeypadDraft}
+                maxLength={
+                  quickKeypadField === "prefix" ? 4 : quickKeypadField === "expiryDate" ? 7 : 2
+                }
+                extras={quickKeypadField === "expiryDate" ? "slash" : undefined}
+                activeLabel={
+                  quickKeypadField === "prefix"
+                    ? "前綴數字 (最多4碼)"
+                    : quickKeypadField === "expiryDate"
+                    ? "民國年月 (如 125/12)"
+                    : "區處2碼 (如 10)"
+                }
+                onChange={(val) => setQuickKeypadDraft(val)}
+                onClear={() => setQuickKeypadDraft("")}
+              />
+
+              <div className="quick-keypad-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setQuickKeypadField(null)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="primary-button highlight-btn"
+                  onClick={commitQuickKeypad}
+                >
+                  確定儲存
                 </button>
               </div>
             </section>
