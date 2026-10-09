@@ -29,6 +29,7 @@ import {
   Square,
   Trash2,
   Upload,
+  User,
   X,
   XCircle,
   Zap,
@@ -3988,7 +3989,7 @@ export function App() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="export-dialog-header">
-                <div>
+                <div className="export-dialog-title-group">
                   <h3>
                     {driveModal.type === "restore"
                       ? "☁️ 選擇 Google 雲端備份並還原"
@@ -4000,34 +4001,43 @@ export function App() {
                       : "請勾選要自雲端硬碟刪除的備份檔案（可多選）："}
                   </span>
                 </div>
-                <div className="dialog-header-actions">
+                <button
+                  type="button"
+                  className="dialog-close-btn"
+                  title="關閉"
+                  disabled={isDriveBusy}
+                  onClick={() => setDriveModal(null)}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="drive-dialog-toolbar">
+                <span className="drive-toolbar-hint">
+                  {driveModal.files.length > 0
+                    ? `共 ${driveModal.files.length} 個備份檔案`
+                    : "已連線至 Google 雲端硬碟"}
+                </span>
+                <div className="drive-toolbar-buttons">
                   <button
                     type="button"
-                    className="dialog-action-icon-btn"
-                    title="強制重新整理雲端清單"
+                    className="drive-toolbar-btn"
+                    title="強制重新整理雲端檔案清單"
                     disabled={isDriveBusy}
                     onClick={() => void handleRefreshDriveList()}
                   >
-                    <RefreshCw size={14} className={isDriveBusy ? "spin" : ""} />
-                    <span>重整</span>
+                    <RefreshCw size={13} className={isDriveBusy ? "spin" : ""} />
+                    <span>重新整理</span>
                   </button>
                   <button
                     type="button"
-                    className="dialog-action-icon-btn"
+                    className="drive-toolbar-btn"
                     title="更換其他 Google 帳號"
                     disabled={isDriveBusy}
                     onClick={() => void handleSwitchDriveAccount()}
                   >
-                    <span>換帳號</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="dialog-close-btn"
-                    title="關閉"
-                    disabled={isDriveBusy}
-                    onClick={() => setDriveModal(null)}
-                  >
-                    <X size={20} />
+                    <User size={13} />
+                    <span>切換帳號</span>
                   </button>
                 </div>
               </div>

@@ -149,6 +149,27 @@ describe("isMeterPairComplete & getMeterPairStatus", () => {
     expect(status.label).toBe("2 / 2 配對成功");
     expect(status.isComplete).toBe(true);
   });
+
+  it("treats restored/imported record as complete even if seenQrTexts only contains another meter's QR", () => {
+    // 雲端還原或 Excel 匯入的完整資料：未在目前相機緩衝區掃過
+    const restoredRecord = {
+      meterNumber: "24094034",
+      model: "GT",
+      manufactureDate: "114/06",
+      inspectionNumber: "14A37221",
+      expiryDate: "125/05",
+      serviceNumber: "41805634",
+    };
+    // 目前相機緩衝區只包含新掃描的另一顆電表 (24094054)
+    const seenOtherMeters = [
+      "AMC;RT-120;24094054;114/06",
+      "L0LH14A37241;24094054",
+    ];
+    expect(isMeterPairComplete(restoredRecord, seenOtherMeters)).toBe(true);
+    const status = getMeterPairStatus(restoredRecord, seenOtherMeters);
+    expect(status.isComplete).toBe(true);
+    expect(status.label).toBe("2 / 2 配對成功");
+  });
 });
 
 describe("parseServiceQrText", () => {

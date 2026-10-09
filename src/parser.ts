@@ -227,7 +227,14 @@ export function isMeterPairComplete(
   }
 
   if (seenQrTexts && seenQrTexts.length > 0) {
-    return countDistinctQrCodesForMeter(record.meterNumber, seenQrTexts) >= 2;
+    const meterQrCount = countDistinctQrCodesForMeter(record.meterNumber, seenQrTexts);
+    // 若該表號不在當前相機掃描緩衝區中（例如雲端還原、Excel匯入或手動建立的完整資料）
+    // 只要實體欄位齊全（銘版＋檢驗號碼均具備），即視為完整配對！
+    // 只有當當前緩衝區存在該表的掃描記錄時（meterQrCount > 0），才檢驗是否已達 2 組
+    if (meterQrCount === 0) {
+      return true;
+    }
+    return meterQrCount >= 2;
   }
 
   return true;
