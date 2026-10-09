@@ -80,7 +80,7 @@ import {
   flushPendingSave,
 } from "./storage";
 import { formatExpiryDate, formatServiceNumber, normalizeServiceNumberTo8Digits } from "./ocr";
-import { feedbackDuplicate, feedbackError, feedbackSuccess } from "./feedback";
+import { feedbackDuplicate, feedbackError, feedbackSuccess, vibrate } from "./feedback";
 import {
   LargeKeypad,
   RecordCard,
@@ -815,10 +815,12 @@ export function App() {
   function commitQuickKeypad() {
     if (!quickKeypadField) return;
     if (quickKeypadField === "prefix") {
-      const clean = quickKeypadDraft.replace(/\D/g, "").slice(0, 4);
+      const clean = quickKeypadDraft.replace(/\D/g, "").slice(0, 6);
       setPrefix(clean);
       if (clean) {
         setPrefixEnabled(true);
+      } else {
+        setPrefixEnabled(false);
       }
       setMessage(clean ? `已設定固定前綴：${clean}` : "已清空固定前綴");
     } else if (quickKeypadField === "expiryDate") {
@@ -2799,8 +2801,9 @@ export function App() {
                           className="quick-ctrl-input"
                           disabled={!data.servicePrefixEnabled}
                           inputMode="numeric"
-                          placeholder={data.servicePrefixEnabled ? "例如 40 或 10" : "點左側勾選啟用"}
-                          title="固定電號前綴"
+                          maxLength={6}
+                          placeholder={data.servicePrefixEnabled ? "例如 40 或 10 (最多6碼)" : "點左側勾選啟用"}
+                          title="固定電號前綴 (最多6碼)"
                           value={data.servicePrefix}
                           onChange={(event) => setPrefix(event.target.value.replace(/\D/g, ""))}
                         />
@@ -2822,7 +2825,7 @@ export function App() {
                 <div className="quick-setting-row">
                   <div className="quick-label-cell">
                     <span className="pref-field-title">檢定期限</span>
-                    <span className="pref-field-sub">同型式自動套用</span>
+                    <span className="pref-field-sub">同型式套用 (免打/自動補)</span>
                   </div>
                   <div className="quick-input-cell">
                     <div className="input-with-clear-wrap">
@@ -2830,7 +2833,7 @@ export function App() {
                         <button
                           type="button"
                           className={`quick-ctrl-display-btn ${!data.defaultExpiryDate ? "placeholder" : ""}`}
-                          title="點此使用大鍵盤輸入期限"
+                          title="點此使用大鍵盤輸入期限 (可免輸入/，如 12512 自動補 /)"
                           onClick={() => openQuickKeypad("expiryDate")}
                         >
                           {data.defaultExpiryDate || "未設定 (可空白)"}
@@ -2839,8 +2842,8 @@ export function App() {
                         <input
                           className="quick-ctrl-input"
                           inputMode="numeric"
-                          placeholder="如 12512 或 125/12"
-                          title="當前檢定期限"
+                          placeholder="如 12512 (免打/自動補) 或 125/12"
+                          title="當前檢定期限 (可免輸入/，連打數字自動補 /)"
                           value={data.defaultExpiryDate}
                           onChange={(event) => handleQuickExpiryDraft(event.target.value)}
                           onBlur={commitQuickExpiry}
@@ -3462,14 +3465,15 @@ export function App() {
                 <div className="settings-item">
                   <div className="settings-item-info">
                     <span className="settings-item-title">電號前綴碼</span>
-                    <span className="settings-item-desc">例如 40 或 10</span>
+                    <span className="settings-item-desc">例如 40 或 10 (最多6碼)</span>
                   </div>
                   <div className="settings-item-action">
                     <div className="input-with-clear-wrap">
                       <input
                         inputMode="numeric"
-                        placeholder="例如 40"
-                        style={{ width: "90px", textAlign: "center", fontWeight: "bold" }}
+                        maxLength={6}
+                        placeholder="最多6碼"
+                        style={{ width: "105px", textAlign: "center", fontWeight: "bold" }}
                         value={data.servicePrefix}
                         onChange={(e) => setPrefix(e.target.value.replace(/\D/g, ""))}
                       />
@@ -3755,7 +3759,7 @@ export function App() {
 
               <div className="pre-scan-body">
                 <p className="pre-scan-notice">
-                  換批次或型式時，期限可能不同。請確認目前檢定期限是否正確：
+                  換批次或型式時，期限可能不同。請確認目前檢定期限是否正確（💡 可免輸入斜線「/」，連打數字如 12512 系統會自動補 /）：
                 </p>
 
                 {data.keypadMode === "large" ? (
@@ -3764,27 +3768,30 @@ export function App() {
                       className={`pre-scan-display-strip ${preScanKeypadOpen ? "active" : ""}`}
                       onClick={() => setPreScanKeypadOpen((prev) => !prev)}
                     >
-                      <span className="pre-scan-label">檢定期限</span>
-                      <div className="pre-scan-val-row">
+                      <div className="pre-scan-strip-main">
+                        <span className="pre-scan-label">檢定期限</span>
                         <strong className="pre-scan-val-text">
                           {preScanExpiryDraft || <span className="placeholder">未設定期限 (保持空白)</span>}
                         </strong>
+                      </div>
+                      <div className="pre-scan-strip-actions">
                         <span className="pre-scan-edit-hint">
                           {preScanKeypadOpen ? "收起大鍵盤" : "點此修改"}
                         </span>
-                        {preScanExpiryDraft ? (
-                          <button
-                            type="button"
-                            className="input-inline-clear-btn"
-                            title="清空"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPreScanExpiryDraft("");
-                            }}
-                          >
-                            <X size={15} />
-                          </button>
-                        ) : null}
+                        <button
+                          type="button"
+                          className={`quick-keypad-clear-pill-btn ${!preScanExpiryDraft ? "disabled" : ""}`}
+                          title="整欄清除"
+                          disabled={!preScanExpiryDraft}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            vibrate(20);
+                            setPreScanExpiryDraft("");
+                          }}
+                        >
+                          <X size={13} />
+                          <span>整欄清除</span>
+                        </button>
                       </div>
                     </div>
 
@@ -3794,14 +3801,14 @@ export function App() {
                           value={preScanExpiryDraft}
                           maxLength={7}
                           extras="slash"
-                          activeLabel="民國年月 (如 12512 或 125/12)"
+                          activeLabel="民國年月 (免輸入/ 連打如12512自動補/)"
                           onChange={(val) => setPreScanExpiryDraft(val)}
                           onClear={() => setPreScanExpiryDraft("")}
                         />
                       </div>
                     ) : (
                       <div className="pre-scan-hint">
-                        同型式電表將自動套用此期限；若本批次無特定期限可保持空白。
+                        💡 提示：可免輸入 /，直接連打數字（例如 12512），系統會自動補 / 為 125/12。同型式電表將自動套用此期限；若本批次無特定期限可保持空白。
                       </div>
                     )}
                   </div>
@@ -3813,7 +3820,7 @@ export function App() {
                         <input
                           className="pre-scan-input"
                           inputMode="numeric"
-                          placeholder="如 12512 或 125/12"
+                          placeholder="如 12512 (免打/自動補) 或 125/12"
                           value={preScanExpiryDraft}
                           onChange={(e) => setPreScanExpiryDraft(e.target.value)}
                         />
@@ -3830,7 +3837,7 @@ export function App() {
                       </div>
                     </div>
                     <div className="pre-scan-hint">
-                      同型式電表將自動套用此期限；若本批次無特定期限可保持空白。
+                      💡 提示：可免輸入 /，直接連打數字（例如 12512），系統會自動補 / 為 125/12。同型式電表將自動套用此期限；若本批次無特定期限可保持空白。
                     </div>
                   </div>
                 )}
@@ -3907,57 +3914,62 @@ export function App() {
               </div>
 
               <div className="quick-keypad-display-card">
-                <span className="quick-keypad-display-label">
-                  {quickKeypadField === "prefix"
-                    ? "固定前綴"
-                    : quickKeypadField === "expiryDate"
-                    ? "檢定期限"
-                    : "區處代碼"}
-                </span>
-                <div className="quick-keypad-display-val">
-                  <strong>
-                    {quickKeypadDraft || (
-                      <span className="placeholder">
-                        {quickKeypadField === "prefix"
-                          ? "未設定前綴"
-                          : quickKeypadField === "expiryDate"
-                          ? "無特定期限（空白）"
-                          : "預設 10 (台南)"}
-                      </span>
-                    )}
-                  </strong>
-                  {quickKeypadDraft ? (
-                    <button
-                      type="button"
-                      className="input-inline-clear-btn"
-                      title="清除"
-                      onClick={() => setQuickKeypadDraft("")}
-                    >
-                      <X size={16} />
-                    </button>
-                  ) : null}
+                <div className="quick-keypad-display-main">
+                  <span className="quick-keypad-display-label">
+                    {quickKeypadField === "prefix"
+                      ? "固定前綴"
+                      : quickKeypadField === "expiryDate"
+                      ? "檢定期限"
+                      : "區處代碼"}
+                  </span>
+                  <div className="quick-keypad-display-val">
+                    <strong>
+                      {quickKeypadDraft || (
+                        <span className="placeholder">
+                          {quickKeypadField === "prefix"
+                            ? "未設定前綴"
+                            : quickKeypadField === "expiryDate"
+                            ? "無特定期限 (保持空白)"
+                            : "預設 10"}
+                        </span>
+                      )}
+                    </strong>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  className={`quick-keypad-clear-pill-btn ${!quickKeypadDraft ? "disabled" : ""}`}
+                  title="整欄清除"
+                  disabled={!quickKeypadDraft}
+                  onClick={() => {
+                    vibrate(20);
+                    setQuickKeypadDraft("");
+                  }}
+                >
+                  <X size={14} />
+                  <span>整欄清除</span>
+                </button>
               </div>
 
               <div className="quick-keypad-hint">
                 {quickKeypadField === "prefix"
-                  ? "配對電表後若續掃電號貼紙或手動輸入，將自動預填此前綴（例如 40 或 10）。"
+                  ? "配對電表後若續掃電號貼紙或手動輸入，將自動預填此前綴（例如 40 或 10，最多 6 碼）。"
                   : quickKeypadField === "expiryDate"
-                  ? "輸入如 12512 或 125/12；同型式電表將自動套用此期限。"
+                  ? "💡 提示：可免輸入斜線「/」，直接連打數字（例如 12512），系統會自動補 / 為 125/12。同型式電表將自動套用此期限。"
                   : "Excel 匯出時自動在 8 碼電號前補此 2 碼並計算第 11 碼檢查號。"}
               </div>
 
               <LargeKeypad
                 value={quickKeypadDraft}
                 maxLength={
-                  quickKeypadField === "prefix" ? 4 : quickKeypadField === "expiryDate" ? 7 : 2
+                  quickKeypadField === "prefix" ? 6 : quickKeypadField === "expiryDate" ? 7 : 2
                 }
                 extras={quickKeypadField === "expiryDate" ? "slash" : undefined}
                 activeLabel={
                   quickKeypadField === "prefix"
-                    ? "前綴數字 (最多4碼)"
+                    ? "前綴數字 (最多6碼)"
                     : quickKeypadField === "expiryDate"
-                    ? "民國年月 (如 125/12)"
+                    ? "民國年月 (免輸入/ 連打如12512自動補/)"
                     : "區處2碼 (如 10)"
                 }
                 onChange={(val) => setQuickKeypadDraft(val)}

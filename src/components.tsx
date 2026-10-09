@@ -105,10 +105,10 @@ export function LargeKeypad(props: {
           <button
             type="button"
             className="keypad-prefix-btn"
-            title="斜線（日期用）"
+            title="斜線（可免打，系統會自動補）"
             onClick={() => handleAlpha("/")}
           >
-            輸入斜線 /
+            輸入斜線 / (亦可免打)
           </button>
         ) : null}
       </div>
@@ -150,13 +150,13 @@ export function LargeKeypad(props: {
         <button
           type="button"
           className="keypad-action-btn clear-btn"
-          title="清除"
+          title="整欄清除"
           onClick={() => {
             vibrate(30);
             onClear();
           }}
         >
-          C
+          整欄清除
         </button>
         <button
           type="button"
@@ -478,7 +478,7 @@ export function RecordEditSheet(props: {
       : activeField === "meterNumber"
         ? "正在輸入「表號」（固定 8 碼）"
         : activeField === "expiryDate"
-          ? "正在輸入「檢定期限」（5碼，例: 12512 → 125/12）"
+          ? "正在輸入「檢定期限」（可免輸入/，連打5碼如 12512 自動補為 125/12）"
           : activeField === "prefix"
             ? "正在輸入「電號前綴」"
             : activeField === "model"
@@ -629,14 +629,14 @@ export function RecordEditSheet(props: {
           <div className="expiry-strip-val-wrap">
             {useLargeKeypad ? (
               <span className="expiry-strip-val">
-                {expiryDate || <span className="expiry-placeholder">點此輸入 (如 12512)</span>}
+                {expiryDate || <span className="expiry-placeholder">點此輸入 (免輸入/ 如 12512)</span>}
               </span>
             ) : (
               <div className="input-with-clear-wrap" onClick={(e) => e.stopPropagation()}>
                 <input
                   className="expiry-system-input"
                   inputMode="numeric"
-                  placeholder="輸入如 12512"
+                  placeholder="如 12512 (免打/自動補)"
                   value={expiryDate}
                   onChange={(e) => onField("expiryDate", formatExpiryDate(e.target.value))}
                 />
