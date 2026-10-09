@@ -13,21 +13,52 @@ export type ExportResult = {
   fileName: string;
   recordCount: number;
   incompleteCount: number;
-  delivery?: { shared: boolean; downloaded: boolean; cancelled?: boolean };
+  delivery?: {
+    shared: boolean;
+    downloaded: boolean;
+    cancelled?: boolean;
+    format?: "xlsx" | "csv";
+    unsupported?: boolean;
+  };
 };
+
+export function canShareFile(file: File): boolean {
+  if (typeof navigator === "undefined" || !navigator.share || !navigator.canShare) {
+    return false;
+  }
+  try {
+    return navigator.canShare({ files: [file] });
+  } catch {
+    return false;
+  }
+}
 
 export function canBrowserShareFiles(): boolean {
   if (typeof navigator === "undefined" || !navigator.share || !navigator.canShare) {
     return false;
   }
   try {
-    const testFile = new File(["test"], "test.xlsx", {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    const testFile = new File(["test"], "test.csv", {
+      type: "text/csv;charset=utf-8",
     });
     return navigator.canShare({ files: [testFile] });
   } catch {
     return false;
   }
+}
+
+export function buildCsvBlob(rows: string[][]): Blob {
+  const escapeCell = (val: string) => {
+    const text = String(val ?? "");
+    if (/[",\r\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  };
+
+  const lines = rows.map((row) => row.map(escapeCell).join(","));
+  const csvContent = "\uFEFF" + lines.join("\r\n");
+  return new Blob([csvContent], { type: "text/csv;charset=utf-8" });
 }
 
 export async function exportRecords(
@@ -49,7 +80,8 @@ export async function exportRecords(
 
   const fileName = `電表資料_${folderDate.replaceAll("-", "")}.xlsx`;
   const workbook = buildWorkbook([headers.slice(), ...rows], statsSheet(folderDate, records));
-  const delivery = await writeOrShareWorkbook(workbook, fileName, mode);
+  const csvRows = [headers.slice(), ...rows];
+  const delivery = await writeOrShareWorkbook(workbook, fileName, mode, csvRows);
 
   return {
     fileName,
@@ -91,7 +123,8 @@ export async function exportAllDates(
   const allHeaders = ["日期", ...headers] as const;
   const fileName = `電表資料全部_${exportTime.replace(/[/:]/g, "")}.xlsx`;
   const workbook = buildWorkbook([allHeaders.slice(), ...rows], undefined);
-  const delivery = await writeOrShareWorkbook(workbook, fileName, mode);
+  const csvRows = [allHeaders.slice(), ...rows];
+  const delivery = await writeOrShareWorkbook(workbook, fileName, mode, csvRows);
 
   return {
     fileName,
@@ -248,7 +281,14 @@ async function writeOrShareWorkbook(
   workbook: XLSX.WorkBook,
   fileName: string,
   mode: ExportDeliveryMode = "auto",
-): Promise<{ shared: boolean; downloaded: boolean; cancelled?: boolean }> {
+  csvRows?: string[][],
+): Promise<{
+  shared: boolean;
+  downloaded: boolean;
+  cancelled?: boolean;
+  format?: "xlsx" | "csv";
+  unsupported?: boolean;
+}> {
   // 1. 原生 Capacitor App（若打包為 APK）
   if (isNativeApp()) {
     const base64 = XLSX.write(workbook, { bookType: "xlsx", type: "base64" });
@@ -264,7 +304,7 @@ async function writeOrShareWorkbook(
         data: base64,
         directory: Directory.Documents,
       });
-      return { shared: false, downloaded: true };
+      return { shared: false, downloaded: true, format: "xlsx" };
     }
 
     await Share.share({
@@ -273,35 +313,69 @@ async function writeOrShareWorkbook(
       url: result.uri,
       dialogTitle: "儲存或分享 Excel（可存至 Google 雲端硬碟、LINE）",
     });
-    return { shared: true, downloaded: false };
+    return { shared: true, downloaded: false, format: "xlsx" };
   }
 
   // 2. Web 環境（PWA / 瀏覽器）
   const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-  const mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  const blob = new Blob([arrayBuffer], { type: mimeType });
+  const xlsxMimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const xlsxBlob = new Blob([arrayBuffer], { type: xlsxMimeType });
 
   const shouldShare = mode === "share" || (mode === "auto" && canBrowserShareFiles());
 
-  if (shouldShare && canBrowserShareFiles()) {
-    try {
-      const file = new File([blob], fileName, { type: mimeType });
-      await navigator.share({
-        title: "電表資料",
-        text: `電表資料：${fileName}`,
-        files: [file],
-      });
-      return { shared: true, downloaded: false };
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        return { shared: false, downloaded: false, cancelled: true };
+  if (shouldShare) {
+    // 步驟 A: 優先嘗試分享原生 .xlsx（在 Safari / iOS 或支援的系統）
+    const xlsxFile = new File([xlsxBlob], fileName, { type: xlsxMimeType });
+    if (canShareFile(xlsxFile)) {
+      try {
+        await navigator.share({
+          title: "電表資料",
+          text: `電表資料：${fileName}`,
+          files: [xlsxFile],
+        });
+        return { shared: true, downloaded: false, format: "xlsx" };
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return { shared: false, downloaded: false, cancelled: true };
+        }
+        console.warn("XLSX 分享失敗，嘗試轉為 CSV 格式分享：", error);
       }
-      console.warn("Web Share 失敗，自動切換至下載：", error);
+    }
+
+    // 步驟 B: Android Chrome 安全限制阻擋 .xlsx 檔案，但原生白名單支援 .csv 試算表格式
+    // 轉為相容度最高的 UTF-8 CSV 格式以喚醒手機原生分享面板（Google 雲端硬碟、LINE、Gmail）
+    if (csvRows && csvRows.length > 0) {
+      const csvBlob = buildCsvBlob(csvRows);
+      const csvFileName = fileName.replace(/\.xlsx$/i, ".csv");
+      const csvFile = new File([csvBlob], csvFileName, { type: "text/csv;charset=utf-8" });
+
+      if (canShareFile(csvFile)) {
+        try {
+          await navigator.share({
+            title: "電表資料",
+            text: `電表資料：${csvFileName}`,
+            files: [csvFile],
+          });
+          return { shared: true, downloaded: false, format: "csv" };
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") {
+            return { shared: false, downloaded: false, cancelled: true };
+          }
+          console.warn("CSV 分享失敗：", error);
+        }
+      }
+    }
+
+    // 若明確選擇「分享」，但當前環境（如電腦瀏覽器或 LINE 內置瀏覽器）完全不支援檔案分享
+    if (mode === "share") {
+      downloadBlob(xlsxBlob, fileName);
+      return { shared: false, downloaded: true, unsupported: true, format: "xlsx" };
     }
   }
 
-  downloadBlob(blob, fileName);
-  return { shared: false, downloaded: true };
+  // mode === "download" 或自動降級
+  downloadBlob(xlsxBlob, fileName);
+  return { shared: false, downloaded: true, format: "xlsx" };
 }
 
 function downloadBlob(blob: Blob, fileName: string): void {

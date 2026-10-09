@@ -267,7 +267,30 @@ export type BackupExportResult = {
   shared: boolean;
   downloaded: boolean;
   cancelled?: boolean;
+  unsupported?: boolean;
 };
+
+function canShareFile(file: File): boolean {
+  if (typeof navigator === "undefined" || !navigator.share || !navigator.canShare) {
+    return false;
+  }
+  try {
+    return navigator.canShare({ files: [file] });
+  } catch {
+    return false;
+  }
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 export async function exportBackup(
   data: StoredAppData,
@@ -304,44 +327,51 @@ export async function exportBackup(
   const mimeType = "application/json";
   const blob = new Blob([json], { type: mimeType });
 
-  const canShare = typeof navigator !== "undefined" && !!navigator.share && !!navigator.canShare;
-  let canShareFiles = false;
-  if (canShare) {
-    try {
-      const testFile = new File([blob], fileName, { type: mimeType });
-      canShareFiles = navigator.canShare({ files: [testFile] });
-    } catch {
-      canShareFiles = false;
-    }
-  }
-
-  const shouldShare = mode === "share" || (mode === "auto" && canShareFiles);
-
-  if (shouldShare && canShareFiles) {
-    try {
-      const file = new File([blob], fileName, { type: mimeType });
-      await navigator.share({
-        title: "電表資料備份",
-        text: `電表資料備份：${fileName}`,
-        files: [file],
-      });
-      return { fileName, shared: true, downloaded: false };
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        return { fileName, shared: false, downloaded: false, cancelled: true };
+  if (mode === "share" || mode === "auto") {
+    // 步驟 A: 嘗試直接分享 .json
+    const jsonFile = new File([blob], fileName, { type: mimeType });
+    if (canShareFile(jsonFile)) {
+      try {
+        await navigator.share({
+          title: "電表資料備份",
+          text: `電表資料備份：${fileName}`,
+          files: [jsonFile],
+        });
+        return { fileName, shared: true, downloaded: false };
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return { fileName, shared: false, downloaded: false, cancelled: true };
+        }
+        console.warn("JSON 格式備份分享失敗：", error);
       }
-      console.warn("Web Share 備份失敗，自動切換至下載：", error);
+    }
+
+    // 步驟 B: Android Chrome 阻擋 .json 檔案類型，但白名單允許 .txt 格式
+    const txtFileName = `電表資料備份_${timestampForName()}.txt`;
+    const txtFile = new File([blob], txtFileName, { type: "text/plain;charset=utf-8" });
+    if (canShareFile(txtFile)) {
+      try {
+        await navigator.share({
+          title: "電表資料備份",
+          text: `電表資料備份：${txtFileName}`,
+          files: [txtFile],
+        });
+        return { fileName: txtFileName, shared: true, downloaded: false };
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return { fileName: txtFileName, shared: false, downloaded: false, cancelled: true };
+        }
+        console.warn("TXT 格式備份分享失敗：", error);
+      }
+    }
+
+    if (mode === "share") {
+      downloadBlob(blob, fileName);
+      return { fileName, shared: false, downloaded: true, unsupported: true };
     }
   }
 
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(blob, fileName);
   return { fileName, shared: false, downloaded: true };
 }
 

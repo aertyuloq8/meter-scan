@@ -1480,9 +1480,12 @@ export function App() {
         }
         setStatus("done");
         if (result.delivery?.shared) {
-          setMessage(`已開啟分享面板（${target.date}，共 ${result.recordCount} 筆）`);
+          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式，可直接存入 Google 雲端硬碟或 LINE）" : "";
+          setMessage(`已開啟分享選單！${fmtText}`);
+        } else if (result.delivery?.unsupported) {
+          setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您自動下載 Excel 檔至本機（${result.recordCount} 筆）`);
         } else {
-          setMessage(`已匯出 ${target.date} 的資料（${result.recordCount} 筆）`);
+          setMessage(`已下載 ${target.date} 的資料（${result.recordCount} 筆）`);
         }
       } else if (target.type === "all") {
         const recordsByDate: Record<string, MeterRecord[]> = {};
@@ -1500,9 +1503,12 @@ export function App() {
         }
         setStatus("done");
         if (result.delivery?.shared) {
-          setMessage(`已開啟分享面板（全部日期共 ${result.recordCount} 筆）`);
+          const fmtText = result.delivery.format === "csv" ? "（相容試算表 CSV 格式，可直接存入 Google 雲端硬碟或 LINE）" : "";
+          setMessage(`已開啟分享選單！${fmtText}`);
+        } else if (result.delivery?.unsupported) {
+          setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您自動下載 Excel 檔至本機（全部日期共 ${result.recordCount} 筆）`);
         } else {
-          setMessage(`已匯出全部日期（${result.recordCount} 筆）`);
+          setMessage(`已下載全部日期的資料（共 ${result.recordCount} 筆）`);
         }
       } else if (target.type === "backup") {
         const result = await exportBackup(dataRef.current, mode);
@@ -1514,7 +1520,9 @@ export function App() {
         }
         setStatus("done");
         if (result.shared) {
-          setMessage(`已開啟備份分享（${result.fileName}）`);
+          setMessage(`已開啟備份分享面板（${result.fileName}，可儲存至 Google 雲端硬碟或 LINE）`);
+        } else if (result.unsupported) {
+          setMessage(`目前瀏覽器不支援直接呼叫分享面板，已為您下載備份檔（${result.fileName}）`);
         } else {
           setMessage(`已下載備份檔（${result.fileName}），請妥善保存`);
         }
@@ -1860,7 +1868,7 @@ export function App() {
         />
         <input
           ref={restoreInputRef}
-          accept=".json,application/json,.xlsx,.xls"
+          accept=".json,.txt,application/json,text/plain,.xlsx,.xls"
           hidden
           type="file"
           onChange={(event) => void handleRestore(event)}
@@ -3054,10 +3062,10 @@ export function App() {
                   <div className="export-option-info">
                     <div className="export-option-title-row">
                       <span className="export-option-title">分享 / 儲存至 Google 雲端硬碟</span>
-                      <span className="export-option-badge">{isShareSupported ? "手機推薦" : "雲端推薦"}</span>
+                      <span className="export-option-badge">{isShareSupported ? "手機推薦" : "雲端硬碟"}</span>
                     </div>
                     <span className="export-option-desc">
-                      叫出手機系統原生分享選單，可直接儲存至「Google 雲端硬碟」、傳送至 LINE 或寄送 Email
+                      立即呼叫手機系統分享選單，可直接存入「Google 雲端硬碟」、傳送至 LINE 或寄送 Email
                     </span>
                   </div>
                 </button>
@@ -3072,9 +3080,9 @@ export function App() {
                     <Download size={24} />
                   </div>
                   <div className="export-option-info">
-                    <span className="export-option-title">直接下載至手機 / 本機</span>
+                    <span className="export-option-title">直接下載 Excel 檔 (.xlsx)</span>
                     <span className="export-option-desc">
-                      儲存檔案至手機或電腦的「下載 (Downloads)」資料夾
+                      直接將包含「電表資料」與「統計」雙分頁之 Excel 活頁簿下載至手機「下載」資料夾
                     </span>
                   </div>
                 </button>
