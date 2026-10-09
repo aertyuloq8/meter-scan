@@ -17,6 +17,8 @@ import {
   Image as ImageIcon,
   Info,
   Loader2,
+  Maximize2,
+  Minimize2,
   Plus,
   RefreshCw,
   Search,
@@ -108,8 +110,33 @@ interface NoticeModalData {
   actions?: NoticeModalAction[];
 }
 
+export type CameraWindowSize = "large" | "xlarge" | "compact";
+
 export function App() {
   const [data, setData] = useState<StoredAppData>(() => loadData());
+  const [cameraWindowSize, setCameraWindowSize] = useState<CameraWindowSize>(() => {
+    try {
+      const saved = localStorage.getItem("camera_window_size");
+      if (saved === "large" || saved === "xlarge" || saved === "compact") {
+        return saved;
+      }
+    } catch {
+      // 略過
+    }
+    return "large";
+  });
+
+  function cycleCameraSize() {
+    setCameraWindowSize((prev) => {
+      const next = prev === "large" ? "xlarge" : prev === "xlarge" ? "compact" : "large";
+      try {
+        localStorage.setItem("camera_window_size", next);
+      } catch {
+        // 略過
+      }
+      return next;
+    });
+  }
   const [activeTab, setActiveTab] = useState<ActiveTab>("scan");
   const [activeDate, setActiveDate] = useState(today());
   const [status, setStatus] = useState<Status>("idle");
@@ -2527,8 +2554,19 @@ export function App() {
 
             {/* Web 相機畫面 (若是 Web 模式下開啟相機) */}
             {!isNativeApp() && cameraActive ? (
-              <div className="camera-frame compact-frame">
+              <div className={`camera-frame size-${cameraWindowSize}`}>
                 <div className="web-camera-tools">
+                  <button
+                    type="button"
+                    className="camera-size-toggle-btn"
+                    onClick={cycleCameraSize}
+                    title="切換相機視窗大小（黃金大視窗 / 全幅超大視窗 / 精簡視窗）"
+                  >
+                    {cameraWindowSize === "xlarge" ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                    <span>
+                      {cameraWindowSize === "xlarge" ? "全幅超大" : cameraWindowSize === "compact" ? "精簡視窗" : "黃金大視窗"}
+                    </span>
+                  </button>
                   <button
                     type="button"
                     className={`torch-toggle-btn ${torchActive ? "active" : ""}`}
@@ -3228,6 +3266,31 @@ export function App() {
                   >
                     <option value="large">自製大鍵盤</option>
                     <option value="system">手機系統鍵盤</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="settings-item">
+                <div className="settings-item-info">
+                  <span className="settings-item-title">相機取景視窗尺寸</span>
+                  <span className="settings-item-desc">調整相機畫面比例與瞄準框視野（大視窗 / 全幅 / 精簡）</span>
+                </div>
+                <div className="settings-item-action">
+                  <select
+                    value={cameraWindowSize}
+                    onChange={(e) => {
+                      const val = e.target.value as CameraWindowSize;
+                      setCameraWindowSize(val);
+                      try {
+                        localStorage.setItem("camera_window_size", val);
+                      } catch {
+                        // 略過
+                      }
+                    }}
+                  >
+                    <option value="large">黃金大視窗 (4:3 推薦)</option>
+                    <option value="xlarge">全幅超大視窗 (1:1)</option>
+                    <option value="compact">精簡視窗 (16:10)</option>
                   </select>
                 </div>
               </div>

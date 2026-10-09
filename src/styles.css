@@ -295,17 +295,39 @@ select {
 
 .camera-frame {
   background: #111813;
-  border-radius: 8px;
-  margin-bottom: 10px;
+  border-radius: 14px;
+  margin-bottom: 12px;
   overflow: hidden;
   position: relative;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s ease;
 }
 
 .camera-frame video {
-  aspect-ratio: 16 / 10;
   display: block;
   object-fit: cover;
   width: 100%;
+  transition: aspect-ratio 0.2s ease;
+}
+
+/* 預設黃金大視窗 (4:3) —— 視覺高深寬廣，視野大幅擴增，告別扁平壓迫感 */
+.camera-frame.size-large video,
+.camera-frame video {
+  aspect-ratio: 4 / 3;
+  min-height: 290px;
+}
+
+/* 全幅超大視窗 (1:1 正方形) —— 超大滿幅無死角視野 */
+.camera-frame.size-xlarge video {
+  aspect-ratio: 1 / 1;
+  min-height: 360px;
+}
+
+/* 精簡視窗 (16:10) */
+.camera-frame.size-compact video {
+  aspect-ratio: 16 / 10;
+  min-height: 230px;
 }
 
 .web-camera-tools {
@@ -346,22 +368,36 @@ select {
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
+/* 瞄準輔助框 —— 大幅加大與開闊 */
 .scan-reticle {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 68%;
+  width: 84%;
   aspect-ratio: 1;
-  max-width: 260px;
+  max-width: 320px;
   pointer-events: none;
   box-sizing: border-box;
+  transition: all 0.2s ease;
+}
+
+.camera-frame.size-xlarge .scan-reticle {
+  width: 88%;
+  aspect-ratio: 1;
+  max-width: 360px;
+}
+
+.camera-frame.size-compact .scan-reticle {
+  width: 70%;
+  aspect-ratio: 1;
+  max-width: 260px;
 }
 
 .scan-reticle-corner {
   position: absolute;
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
   border-color: #2ed573;
   border-style: solid;
 }
@@ -369,29 +405,29 @@ select {
 .scan-reticle-corner.tl {
   top: 0;
   left: 0;
-  border-width: 3px 0 0 3px;
-  border-top-left-radius: 6px;
+  border-width: 3.5px 0 0 3.5px;
+  border-top-left-radius: 8px;
 }
 
 .scan-reticle-corner.tr {
   top: 0;
   right: 0;
-  border-width: 3px 3px 0 0;
-  border-top-right-radius: 6px;
+  border-width: 3.5px 3.5px 0 0;
+  border-top-right-radius: 8px;
 }
 
 .scan-reticle-corner.bl {
   bottom: 0;
   left: 0;
-  border-width: 0 0 3px 3px;
-  border-bottom-left-radius: 6px;
+  border-width: 0 0 3.5px 3.5px;
+  border-bottom-left-radius: 8px;
 }
 
 .scan-reticle-corner.br {
   bottom: 0;
   right: 0;
-  border-width: 0 3px 3px 0;
-  border-bottom-right-radius: 6px;
+  border-width: 0 3.5px 3.5px 0;
+  border-bottom-right-radius: 8px;
 }
 
 .scan-laser-line {
@@ -1517,6 +1553,34 @@ select {
   gap: 8px;
 }
 
+.camera-size-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: rgba(26, 36, 29, 0.88);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+  transition: all 0.15s ease;
+}
+
+.camera-size-toggle-btn:hover {
+  background: rgba(45, 60, 48, 0.95);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.camera-size-toggle-btn:active {
+  transform: scale(0.96);
+}
+
 .torch-toggle-btn {
   display: inline-flex;
   align-items: center;
@@ -1565,11 +1629,11 @@ select {
 }
 
 .native-scan-target {
-  border: 2px solid rgba(255, 255, 255, 0.92);
-  border-radius: 8px;
-  box-shadow: 0 0 0 999px rgba(8, 18, 11, 0.12);
-  height: min(52vw, 230px);
-  width: min(52vw, 230px);
+  border: 2.5px solid rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 0 0 999px rgba(8, 18, 11, 0.18);
+  height: min(72vw, 320px);
+  width: min(72vw, 320px);
 }
 
 .native-stop-button {
