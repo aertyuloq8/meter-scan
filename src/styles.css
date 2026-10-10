@@ -2989,6 +2989,34 @@ select {
   color: #1b5e20;
 }
 
+.cache-refresh-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: #eaf5e6;
+  border: 1px solid #b7d6b0;
+  border-radius: 6px;
+  color: #1b5e20;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 2px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.cache-refresh-pill-btn:hover {
+  background: #def0d8;
+  border-color: #9ac791;
+}
+
+.cache-refresh-pill-btn:active {
+  background: #d4e8cf;
+  transform: scale(0.97);
+}
+
 /* ================= v2.2.1 抽屜溢出／鍵盤統整修復 ================= */
 
 /* 1. 對話框 overlay 必須蓋過底部導航欄（nav z-index 80） */

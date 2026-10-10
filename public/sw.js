@@ -1,4 +1,4 @@
-const CACHE_NAME = "meter-scan-v2.4.3";
+const CACHE_NAME = "meter-scan-v2.4.4";
 const PRECACHE_ASSETS = [
   "./",
   "./index.html",
@@ -7,11 +7,11 @@ const PRECACHE_ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches
       .open(CACHE_NAME)
       .then((cache) => cache.addAll(PRECACHE_ASSETS).catch(() => {}))
-      .then(() => self.skipWaiting())
   );
 });
 

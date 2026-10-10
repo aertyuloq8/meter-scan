@@ -2517,6 +2517,33 @@ export function App() {
     setEditError("");
   }
 
+  async function handleForceRefreshCache() {
+    if (!navigator.onLine) {
+      alert("目前處於離線狀態，請先連上網路後再點擊更新快取！");
+      return;
+    }
+    if (!window.confirm(`即將清除舊快取並重載最新版本 (v${APP_VERSION})，是否繼續？`)) {
+      return;
+    }
+    try {
+      if ("serviceWorker" in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const registration of registrations) {
+          await registration.unregister();
+        }
+      }
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        for (const key of keys) {
+          await caches.delete(key);
+        }
+      }
+    } catch {
+      // 忽略清理錯誤
+    }
+    window.location.reload();
+  }
+
   function setEditPrefixEnabled(enabled: boolean) {
     setEditDraft((current) => {
       if (!current) {
@@ -3740,6 +3767,18 @@ export function App() {
                 <div className="storage-stat-box">
                   <span className="stat-box-label">應用程式版本</span>
                   <span className="stat-box-value">v{APP_VERSION}</span>
+                </div>
+                <div className="storage-stat-box">
+                  <span className="stat-box-label">離線快取管理</span>
+                  <button
+                    type="button"
+                    className="cache-refresh-pill-btn"
+                    onClick={() => void handleForceRefreshCache()}
+                    title="清除舊快取並重載最新版本"
+                  >
+                    <RefreshCw size={12} />
+                    <span>更新離線快取</span>
+                  </button>
                 </div>
               </div>
             </div>

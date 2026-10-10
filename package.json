@@ -1,6 +1,6 @@
 {
   "name": "meter-scan-web",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "description": "電表資料掃描系統 (Web PWA)",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
