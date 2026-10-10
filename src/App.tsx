@@ -178,6 +178,8 @@ export function App() {
   } | null>(null);
   const [isDriveBusy, setIsDriveBusy] = useState(false);
   const [noticeModal, setNoticeModal] = useState<NoticeModalData | null>(null);
+  const [justSavedMeter, setJustSavedMeter] = useState<string | null>(null);
+  const justSavedMeterRef = useRef<{ meter: string; until: number } | null>(null);
   const isShareSupported = useMemo(() => canBrowserShareFiles() || isNativeApp(), []);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -616,8 +618,10 @@ export function App() {
 
   async function startWebScanner() {
     setCameraActive(true);
-    setStatus("scanning");
-    setMessage("相機已開啟，請對準電表 QRCode");
+    if (!(justSavedMeterRef.current && Date.now() < justSavedMeterRef.current.until)) {
+      setStatus("scanning");
+      setMessage("相機已開啟，請對準電表 QRCode");
+    }
     void acquireWakeLock();
 
     // 等待 DOM 掛載 video 節點
@@ -786,6 +790,8 @@ export function App() {
 
   function stopCamera() {
     // 等貼紙中按停止：回到手輸，彈抽屜讓人工輸入電號
+    justSavedMeterRef.current = null;
+    setJustSavedMeter(null);
     const pendingMeter = pendingCompletionRef.current;
     pendingCompletionRef.current = null;
     void stopActiveScanner().then(() => {
@@ -928,8 +934,10 @@ export function App() {
       setCameraActive(true);
       document.documentElement.classList.add("barcode-scanner-active");
       document.body.classList.add("barcode-scanner-active");
-      setStatus("scanning");
-      setMessage("連續掃描中，請先掃同一個電表的兩個 QRCode");
+      if (!(justSavedMeterRef.current && Date.now() < justSavedMeterRef.current.until)) {
+        setStatus("scanning");
+        setMessage("連續掃描中，請先掃同一個電表的兩個 QRCode");
+      }
       void acquireWakeLock();
 
       nativeListenerRef.current = await BarcodeScanner.addListener("barcodesScanned", (event) => {
@@ -1021,8 +1029,16 @@ export function App() {
       // 若當前畫面「只有」已完成的表，沒有任何新電表的 QR，才提示移動至下一台
       const hasAnyNew = meterTexts.some((text) => !completedOldTexts.includes(text));
       if (!hasAnyNew) {
-        setStatus("duplicate");
         const completedMeter = parseQrText(completedOldTexts[0])?.meterNumber || "";
+        if (
+          justSavedMeterRef.current &&
+          justSavedMeterRef.current.meter === completedMeter &&
+          Date.now() < justSavedMeterRef.current.until
+        ) {
+          // 剛存好，鏡頭還停留在原表：保持安心綠色儲存成功提示，不跳紅光、不震動！
+          return;
+        }
+        setStatus("duplicate");
         setMessage(
           completedMeter
             ? `此電表已完成 (表號 ${completedMeter})，請移至下一台`
@@ -1037,6 +1053,9 @@ export function App() {
     if (!newMeterCandidates.length) {
       return;
     }
+
+    justSavedMeterRef.current = null;
+    setJustSavedMeter(null);
 
     // 3. 自動切換電表鎖定（Auto-advance）：
     // 嚴格保護規則：
@@ -1580,6 +1599,16 @@ export function App() {
           dupRec &&
           isMeterPairComplete(dupRec, curFolder.seenQrTexts) &&
           Boolean((dupRec.serviceNumber ?? "").replace(/\D/g, ""));
+
+        if (
+          isDupDone &&
+          justSavedMeterRef.current &&
+          justSavedMeterRef.current.meter === dupMeter &&
+          Date.now() < justSavedMeterRef.current.until
+        ) {
+          // 剛存好，鏡頭還停留在原表：保持安心綠色儲存成功提示，不跳紅光、不震動！
+          return;
+        }
 
         setStatus("duplicate");
         if (isDupDone) {
@@ -2649,8 +2678,22 @@ export function App() {
     pendingCompletionRef.current = null;
     setTargetMeterLive(null);
     nativeSessionTextsRef.current.clear();
-    setStatus("done");
-    setMessage(`電表 ${meterNumber || "資料"} 已完成儲存`);
+
+    const isContinuingComplete = continueScanning && draft.mode === "complete";
+    if (isContinuingComplete && meterNumber) {
+      justSavedMeterRef.current = { meter: meterNumber, until: Date.now() + 2500 };
+      setJustSavedMeter(meterNumber);
+      window.setTimeout(() => {
+        setJustSavedMeter((cur) => (cur === meterNumber ? null : cur));
+      }, 2500);
+      setStatus("done");
+      setMessage(`表號 ${meterNumber} 儲存成功！此電表已完成，請移至下一台`);
+    } else {
+      justSavedMeterRef.current = null;
+      setJustSavedMeter(null);
+      setStatus("done");
+      setMessage(`電表 ${meterNumber || "資料"} 已完成儲存`);
+    }
 
     if (continueScanning && draft.mode === "complete") {
       if (continueScanTimerRef.current !== null) {
@@ -2768,14 +2811,8 @@ export function App() {
                   ) : null}
                 </div>
                 {scanEngine ? (
-                  <div className={`engine-badge ${scanEngine}`}>
-                    {scanEngine === "mlkit" ? (
-                      <>
-                        <Zap size={12} /> ML Kit 極速硬體加速
-                      </>
-                    ) : (
-                      "標準解碼 (ZXing)"
-                    )}
+                  <div className={`engine-badge ${scanEngine}`} aria-hidden="true">
+                    {scanEngine === "mlkit" ? <Zap size={12} /> : null}
                   </div>
                 ) : null}
                 <div className="scan-reticle">
@@ -2794,6 +2831,11 @@ export function App() {
                   <div className="camera-scan-hud sticker-hud">
                     <Tag size={15} className="hud-icon-pulse" />
                     <span>已配對{activeAlertMeter ? ` (${activeAlertMeter})` : ""}・請掃電號標籤</span>
+                  </div>
+                ) : justSavedMeter ? (
+                  <div className="camera-scan-hud success-hud">
+                    <CheckCircle2 size={15} className="hud-icon-pulse" />
+                    <span>表號 {justSavedMeter} 儲存成功・請移下一台</span>
                   </div>
                 ) : null}
                 <video ref={videoRef} muted playsInline />
@@ -4139,6 +4181,11 @@ export function App() {
               <div className="camera-scan-hud sticker-hud native-hud">
                 <Tag size={15} className="hud-icon-pulse" />
                 <span>已配對{activeAlertMeter ? ` (${activeAlertMeter})` : ""}・請掃電號標籤</span>
+              </div>
+            ) : justSavedMeter ? (
+              <div className="camera-scan-hud success-hud native-hud">
+                <CheckCircle2 size={15} className="hud-icon-pulse" />
+                <span>表號 {justSavedMeter} 儲存成功・請移下一台</span>
               </div>
             ) : null}
 

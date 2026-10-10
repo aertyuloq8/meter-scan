@@ -399,32 +399,7 @@ select {
 }
 
 .engine-badge {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 5;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  backdrop-filter: blur(4px);
-  pointer-events: none;
-}
-
-.engine-badge.mlkit {
-  background: rgba(31, 111, 82, 0.9);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-}
-
-.engine-badge.zxing {
-  background: rgba(45, 55, 72, 0.9);
-  color: #e2e8f0;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: none !important;
 }
 
 /* 瞄準輔助框 —— 大幅加大與開闊 */
@@ -2477,6 +2452,24 @@ select {
   100% {
     background: rgba(235, 115, 0, 0.98);
     box-shadow: 0 0 22px rgba(250, 140, 22, 0.9);
+  }
+}
+
+.camera-scan-hud.success-hud {
+  background: rgba(27, 94, 32, 0.94);
+  border: 1.5px solid #81c784;
+  color: #ffffff;
+  animation: hudGreenPulse 0.9s infinite alternate ease-in-out;
+}
+
+@keyframes hudGreenPulse {
+  0% {
+    background: rgba(27, 94, 32, 0.94);
+    box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+  }
+  100% {
+    background: rgba(46, 125, 50, 0.98);
+    box-shadow: 0 0 22px rgba(76, 175, 80, 0.9);
   }
 }
 
