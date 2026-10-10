@@ -27,6 +27,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Square,
+  Tag,
   Trash2,
   Upload,
   User,
@@ -1016,7 +1017,12 @@ export function App() {
       const hasAnyNew = meterTexts.some((text) => !completedOldTexts.includes(text));
       if (!hasAnyNew) {
         setStatus("duplicate");
-        setMessage("此電表已完成，請移動到下一個電表");
+        const completedMeter = parseQrText(completedOldTexts[0])?.meterNumber || "";
+        setMessage(
+          completedMeter
+            ? `此電表已完成 (表號 ${completedMeter})，請移至下一台`
+            : "此電表已完成，請移動到下一個電表"
+        );
         feedbackDuplicate();
         return;
       }
@@ -1511,7 +1517,7 @@ export function App() {
         ) {
           pendingCompletionRef.current = completedRecord.meterNumber;
           setStatus("scanning");
-          setMessage("配對成功，請掃電號貼紙（無貼紙按停止改手輸）");
+          setMessage(`已配對表號${completedRecord.meterNumber}，配對成功，請掃電號貼紙（無貼紙按停止改手輸）`);
           feedbackSuccess();
           return;
         }
@@ -1548,19 +1554,45 @@ export function App() {
         );
         if (pendingCompletionRef.current && scannedMeters.has(pendingCompletionRef.current)) {
           setStatus("scanning");
-          setMessage("配對成功，請掃電號貼紙（無貼紙按停止改手輸）");
+          setMessage(`已配對表號${pendingCompletionRef.current}，配對成功，請掃電號貼紙（無貼紙按停止改手輸）`);
           feedbackDuplicate();
           return;
         }
+
+        const dupMeter =
+          meterRawTexts.map((text) => parseQrText(text)?.meterNumber || "").find(Boolean) || "";
+        const curFolder = dataRef.current.folders[activeDateRef.current] ?? { records: [], seenQrTexts: [] };
+        const dupRec = curFolder.records.find((r) => r.meterNumber === dupMeter);
+        const isDupDone =
+          dupRec &&
+          isMeterPairComplete(dupRec, curFolder.seenQrTexts) &&
+          Boolean((dupRec.serviceNumber ?? "").replace(/\D/g, ""));
+
         setStatus("duplicate");
-        setMessage("這組 QRCode 已掃描過，請移動到同一個電表的另一個 QRCode");
+        if (isDupDone) {
+          setMessage(
+            dupMeter
+              ? `此電表已完成 (表號 ${dupMeter})，請移至下一台`
+              : "此電表已完成，請移動到下一個電表"
+          );
+        } else if (dupMeter) {
+          setMessage(`QRCode 已掃過 (表號 ${dupMeter})，請掃同表另一組 QR`);
+        } else {
+          setMessage("這組 QRCode 已掃描過，請移動到同一個電表的另一個 QRCode");
+        }
         feedbackDuplicate();
         return;
       }
 
+      const dupMeter =
+        meterRawTexts.map((text) => parseQrText(text)?.meterNumber || "").find(Boolean) || "";
       updateData((current) => ({ ...current, lastQrText: cleanedText }));
       setStatus("duplicate");
-      setMessage("這組 QRCode 已掃描過，已忽略");
+      setMessage(
+        dupMeter
+          ? `此電表已掃過 (表號 ${dupMeter})，已忽略`
+          : "這組 QRCode 已掃描過，已忽略"
+      );
       feedbackDuplicate();
       return;
     }
@@ -2619,6 +2651,15 @@ export function App() {
     }
   }
 
+  const isWaitingSticker = Boolean(pendingCompletionRef.current) || message.includes("請掃電號");
+  const isDuplicateAlert =
+    status === "duplicate" ||
+    message.includes("已完成") ||
+    message.includes("已掃過") ||
+    message.includes("已掃描過");
+  const alertMeterMatch = message.match(/表號[:\s]*([A-Z0-9]+)/i);
+  const activeAlertMeter = alertMeterMatch ? alertMeterMatch[1] : (pendingCompletionRef.current || targetMeter || "");
+
   return (
     <main className="app-shell">
       <section className={`mobile-workspace ${isNativeApp() && cameraActive ? "native-scan-workspace" : ""}`}>
@@ -2654,14 +2695,30 @@ export function App() {
               </div>
             </header>
 
-            <div className={`status-banner ${status}`}>
-              {status === "scanning" ? <Loader2 className="spin" size={18} /> : <ClipboardPlus size={18} />}
+            <div
+              className={`status-banner ${status} ${isWaitingSticker ? "waiting-sticker" : ""} ${
+                isDuplicateAlert ? "duplicate-alert" : ""
+              }`}
+            >
+              {isDuplicateAlert ? (
+                <AlertTriangle className="banner-alert-icon" size={18} />
+              ) : isWaitingSticker ? (
+                <Tag className="banner-alert-icon" size={18} />
+              ) : status === "scanning" ? (
+                <Loader2 className="spin" size={18} />
+              ) : (
+                <ClipboardPlus size={18} />
+              )}
               <span>{message}</span>
             </div>
 
             {/* Web 相機畫面 (若是 Web 模式下開啟相機) */}
             {!isNativeApp() && cameraActive ? (
-              <div className={`camera-frame size-${cameraWindowSize}`}>
+              <div
+                className={`camera-frame size-${cameraWindowSize} ${
+                  isWaitingSticker ? "waiting-sticker" : ""
+                } ${isDuplicateAlert ? "duplicate-alert" : ""}`}
+              >
                 <div className="web-camera-tools">
                   <button
                     type="button"
@@ -2706,6 +2763,17 @@ export function App() {
                   <div className="scan-reticle-corner br" />
                   <div className="scan-laser-line" />
                 </div>
+                {isDuplicateAlert ? (
+                  <div className="camera-scan-hud duplicate-hud">
+                    <AlertTriangle size={15} className="hud-icon-pulse" />
+                    <span>此電表已完成{activeAlertMeter ? ` (${activeAlertMeter})` : ""}・請移下一台</span>
+                  </div>
+                ) : isWaitingSticker ? (
+                  <div className="camera-scan-hud sticker-hud">
+                    <Tag size={15} className="hud-icon-pulse" />
+                    <span>已配對{activeAlertMeter ? ` (${activeAlertMeter})` : ""}・請掃電號標籤</span>
+                  </div>
+                ) : null}
                 <video ref={videoRef} muted playsInline />
               </div>
             ) : null}
@@ -3768,30 +3836,32 @@ export function App() {
                       className={`pre-scan-display-strip ${preScanKeypadOpen ? "active" : ""}`}
                       onClick={() => setPreScanKeypadOpen((prev) => !prev)}
                     >
-                      <div className="pre-scan-strip-main">
+                      <div className="pre-scan-card-top">
                         <span className="pre-scan-label">檢定期限</span>
+                        <div className="pre-scan-strip-actions">
+                          <span className="pre-scan-edit-hint">
+                            {preScanKeypadOpen ? "收起大鍵盤" : "點此修改"}
+                          </span>
+                          <button
+                            type="button"
+                            className={`quick-keypad-clear-pill-btn ${!preScanExpiryDraft ? "disabled" : ""}`}
+                            title="整欄清除"
+                            disabled={!preScanExpiryDraft}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              vibrate(20);
+                              setPreScanExpiryDraft("");
+                            }}
+                          >
+                            <X size={12} />
+                            <span>整欄清除</span>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="pre-scan-card-bottom">
                         <strong className="pre-scan-val-text">
                           {preScanExpiryDraft || <span className="placeholder">未設定期限 (保持空白)</span>}
                         </strong>
-                      </div>
-                      <div className="pre-scan-strip-actions">
-                        <span className="pre-scan-edit-hint">
-                          {preScanKeypadOpen ? "收起大鍵盤" : "點此修改"}
-                        </span>
-                        <button
-                          type="button"
-                          className={`quick-keypad-clear-pill-btn ${!preScanExpiryDraft ? "disabled" : ""}`}
-                          title="整欄清除"
-                          disabled={!preScanExpiryDraft}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            vibrate(20);
-                            setPreScanExpiryDraft("");
-                          }}
-                        >
-                          <X size={13} />
-                          <span>整欄清除</span>
-                        </button>
                       </div>
                     </div>
 
@@ -3914,7 +3984,7 @@ export function App() {
               </div>
 
               <div className="quick-keypad-display-card">
-                <div className="quick-keypad-display-main">
+                <div className="quick-keypad-card-top">
                   <span className="quick-keypad-display-label">
                     {quickKeypadField === "prefix"
                       ? "固定前綴"
@@ -3922,33 +3992,33 @@ export function App() {
                       ? "檢定期限"
                       : "區處代碼"}
                   </span>
-                  <div className="quick-keypad-display-val">
-                    <strong>
-                      {quickKeypadDraft || (
-                        <span className="placeholder">
-                          {quickKeypadField === "prefix"
-                            ? "未設定前綴"
-                            : quickKeypadField === "expiryDate"
-                            ? "無特定期限 (保持空白)"
-                            : "預設 10"}
-                        </span>
-                      )}
-                    </strong>
-                  </div>
+                  <button
+                    type="button"
+                    className={`quick-keypad-clear-pill-btn ${!quickKeypadDraft ? "disabled" : ""}`}
+                    title="整欄清除"
+                    disabled={!quickKeypadDraft}
+                    onClick={() => {
+                      vibrate(20);
+                      setQuickKeypadDraft("");
+                    }}
+                  >
+                    <X size={12} />
+                    <span>整欄清除</span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className={`quick-keypad-clear-pill-btn ${!quickKeypadDraft ? "disabled" : ""}`}
-                  title="整欄清除"
-                  disabled={!quickKeypadDraft}
-                  onClick={() => {
-                    vibrate(20);
-                    setQuickKeypadDraft("");
-                  }}
-                >
-                  <X size={14} />
-                  <span>整欄清除</span>
-                </button>
+                <div className="quick-keypad-card-bottom">
+                  <strong className="quick-keypad-val-large">
+                    {quickKeypadDraft || (
+                      <span className="placeholder">
+                        {quickKeypadField === "prefix"
+                          ? "未設定前綴"
+                          : quickKeypadField === "expiryDate"
+                          ? "無特定期限 (保持空白)"
+                          : "預設 10"}
+                      </span>
+                    )}
+                  </strong>
+                </div>
               </div>
 
               <div className="quick-keypad-hint">
@@ -4000,8 +4070,18 @@ export function App() {
         {isNativeApp() && cameraActive ? (
           <div className="native-scan-overlay">
             <div className="native-scan-status">
-              <div className={`status-banner ${status}`}>
-                <Loader2 className="spin" size={18} />
+              <div
+                className={`status-banner ${status} ${isWaitingSticker ? "waiting-sticker" : ""} ${
+                  isDuplicateAlert ? "duplicate-alert" : ""
+                }`}
+              >
+                {isDuplicateAlert ? (
+                  <AlertTriangle className="banner-alert-icon" size={18} />
+                ) : isWaitingSticker ? (
+                  <Tag className="banner-alert-icon" size={18} />
+                ) : (
+                  <Loader2 className="spin" size={18} />
+                )}
                 <span>{message}</span>
               </div>
 
@@ -4023,6 +4103,18 @@ export function App() {
                 ) : null}
               </div>
             </div>
+
+            {isDuplicateAlert ? (
+              <div className="camera-scan-hud duplicate-hud native-hud">
+                <AlertTriangle size={15} className="hud-icon-pulse" />
+                <span>此電表已完成{activeAlertMeter ? ` (${activeAlertMeter})` : ""}・請移下一台</span>
+              </div>
+            ) : isWaitingSticker ? (
+              <div className="camera-scan-hud sticker-hud native-hud">
+                <Tag size={15} className="hud-icon-pulse" />
+                <span>已配對{activeAlertMeter ? ` (${activeAlertMeter})` : ""}・請掃電號標籤</span>
+              </div>
+            ) : null}
 
             <div className="native-scan-target" aria-hidden="true" />
 
