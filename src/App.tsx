@@ -778,6 +778,10 @@ export function App() {
     if (detector) {
       setScanEngine("mlkit");
       let active = true;
+      // 相機節流：每幀都辨識太耗電，限制最快 120ms 一次（約每秒 8 次），
+      // 人手持至少停 0.5 秒，體感掃速不變，工作量剩約 1/7。
+      let lastDetectAt = 0;
+      const SCAN_THROTTLE_MS = 120;
 
       webScannerStopRef.current = () => {
         active = false;
@@ -789,7 +793,13 @@ export function App() {
           return;
         }
 
-        if (video.readyState >= 2 && !nativeProcessingRef.current) {
+        const now = Date.now();
+        if (
+          video.readyState >= 2 &&
+          !nativeProcessingRef.current &&
+          now - lastDetectAt >= SCAN_THROTTLE_MS
+        ) {
+          lastDetectAt = now;
           try {
             const detected = await detector.detect(video);
             if (detected.length > 0 && cameraActiveRef.current && canAcceptCameraScan()) {
@@ -832,7 +842,7 @@ export function App() {
       const hints = new Map();
       hints.set(DecodeHintType.POSSIBLE_FORMATS, [ZXBarcodeFormat.QR_CODE]);
       hints.set(DecodeHintType.TRY_HARDER, true);
-      const reader = new BrowserQRCodeReader(hints, { delayBetweenScanAttempts: 80 });
+      const reader = new BrowserQRCodeReader(hints, { delayBetweenScanAttempts: 150 });
 
       try {
         const controls = await reader.decodeFromVideoElement(video, (result) => {

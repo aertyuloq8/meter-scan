@@ -1,4 +1,4 @@
-const CACHE_NAME = "meter-scan-v2.4.5";
+const CACHE_NAME = "meter-scan-v2.4.6";
 const PRECACHE_ASSETS = [
   "./",
   "./index.html",

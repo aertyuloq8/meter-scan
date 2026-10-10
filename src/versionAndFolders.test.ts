@@ -6,7 +6,7 @@ import { sanitizeData } from "./storage";
 describe("版本同步與空白資料夾管理", () => {
   it("APP_VERSION 必須與 package.json 嚴格同步", () => {
     expect(APP_VERSION).toBe(packageJson.version);
-    expect(APP_VERSION).toBe("2.4.5");
+    expect(APP_VERSION).toBe("2.4.6");
   });
 
   it("sanitizeData 自動清理過往無任何紀錄的空白測試資料夾，保留今日與有紀錄資料夾", () => {
