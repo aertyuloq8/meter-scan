@@ -204,7 +204,17 @@ select {
   color: #1f6f52;
 }
 
-.status-banner.duplicate,
+.status-banner.done svg {
+  color: #2e7d32;
+  flex-shrink: 0;
+}
+
+.status-banner.duplicate {
+  background: #fff8e8;
+  border: 1px solid #eed499;
+  color: #73551a;
+}
+
 .status-banner.duplicate-alert {
   background: #fff1f0;
   border: 1.5px solid #ff4d4f;

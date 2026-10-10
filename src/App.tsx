@@ -790,6 +790,8 @@ export function App() {
     pendingCompletionRef.current = null;
     void stopActiveScanner().then(() => {
       if (!pendingMeter) {
+        setStatus("idle");
+        setMessage("按掃描開始讀取 QRCode");
         return;
       }
       const folder = dataRef.current.folders[activeDateRef.current] ?? { records: [], seenQrTexts: [] };
@@ -798,6 +800,9 @@ export function App() {
       if (pendingRecord && !(pendingRecord.serviceNumber ?? "").replace(/\D/g, "")) {
         setTargetMeterLive(null);
         openCompletionDraft(pendingRecord, pendingIndex);
+      } else {
+        setStatus("idle");
+        setMessage("按掃描開始讀取 QRCode");
       }
     });
   }
@@ -1178,6 +1183,14 @@ export function App() {
     scanReadyAtRef.current = 0;
     await releaseWakeLock();
     setCameraActive(false);
+    setStatus((prev) => (prev === "scanning" || prev === "duplicate" ? "idle" : prev));
+    setMessage((prev) =>
+      prev.includes("請移至下一台") ||
+      prev.includes("請移動到下一個電表") ||
+      prev.includes("連續掃描中")
+        ? "按掃描開始讀取 QRCode"
+        : prev,
+    );
   }
 
   function canAcceptCameraScan(): boolean {
@@ -2651,12 +2664,17 @@ export function App() {
     }
   }
 
-  const isWaitingSticker = Boolean(pendingCompletionRef.current) || message.includes("請掃電號");
+  const isWaitingSticker =
+    cameraActive &&
+    (Boolean(pendingCompletionRef.current) || message.includes("請掃電號"));
   const isDuplicateAlert =
-    status === "duplicate" ||
-    message.includes("已完成") ||
-    message.includes("已掃過") ||
-    message.includes("已掃描過");
+    cameraActive &&
+    status !== "done" &&
+    (status === "duplicate" ||
+      message.includes("此電表已完成") ||
+      message.includes("請移至下一台") ||
+      message.includes("已掃過") ||
+      message.includes("已掃描過"));
   const alertMeterMatch = message.match(/表號[:\s]*([A-Z0-9]+)/i);
   const activeAlertMeter = alertMeterMatch ? alertMeterMatch[1] : (pendingCompletionRef.current || targetMeter || "");
 
@@ -2704,6 +2722,10 @@ export function App() {
                 <AlertTriangle className="banner-alert-icon" size={18} />
               ) : isWaitingSticker ? (
                 <Tag className="banner-alert-icon" size={18} />
+              ) : status === "done" ? (
+                <CheckCircle2 size={18} />
+              ) : status === "duplicate" ? (
+                <AlertTriangle size={18} />
               ) : status === "scanning" ? (
                 <Loader2 className="spin" size={18} />
               ) : (
@@ -3827,7 +3849,7 @@ export function App() {
 
               <div className="pre-scan-body">
                 <p className="pre-scan-notice">
-                  換批次或型式時，期限可能不同。請確認目前檢定期限是否正確（💡 可免輸入斜線「/」，連打數字如 12512 系統會自動補 /）：
+                  換批次或型式時，期限可能不同。請確認目前檢定期限是否正確：
                 </p>
 
                 {data.keypadMode === "large" ? (
@@ -3871,14 +3893,14 @@ export function App() {
                           value={preScanExpiryDraft}
                           maxLength={7}
                           extras="slash"
-                          activeLabel="民國年月 (免輸入/ 連打如12512自動補/)"
+                          activeLabel="民國年月 (連打如 12512 自動補 /)"
                           onChange={(val) => setPreScanExpiryDraft(val)}
                           onClear={() => setPreScanExpiryDraft("")}
                         />
                       </div>
                     ) : (
                       <div className="pre-scan-hint">
-                        💡 提示：可免輸入 /，直接連打數字（例如 12512），系統會自動補 / 為 125/12。同型式電表將自動套用此期限；若本批次無特定期限可保持空白。
+                        💡 提示：免輸入斜線「/」，連打數字（如 12512 系統自動轉為 125/12）。同型式電表將自動套用；無特定期限可保持空白。
                       </div>
                     )}
                   </div>
@@ -3907,7 +3929,7 @@ export function App() {
                       </div>
                     </div>
                     <div className="pre-scan-hint">
-                      💡 提示：可免輸入 /，直接連打數字（例如 12512），系統會自動補 / 為 125/12。同型式電表將自動套用此期限；若本批次無特定期限可保持空白。
+                      💡 提示：免輸入斜線「/」，連打數字（如 12512 系統自動轉為 125/12）。同型式電表將自動套用；無特定期限可保持空白。
                     </div>
                   </div>
                 )}
@@ -4079,6 +4101,10 @@ export function App() {
                   <AlertTriangle className="banner-alert-icon" size={18} />
                 ) : isWaitingSticker ? (
                   <Tag className="banner-alert-icon" size={18} />
+                ) : status === "done" ? (
+                  <CheckCircle2 size={18} />
+                ) : status === "duplicate" ? (
+                  <AlertTriangle size={18} />
                 ) : (
                   <Loader2 className="spin" size={18} />
                 )}
