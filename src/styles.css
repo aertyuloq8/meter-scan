@@ -2852,6 +2852,105 @@ select {
   color: #213827;
 }
 
+.settings-accordion-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-toggle-all-btn {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #c9d8c4;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1b5e20;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.settings-toggle-all-btn:hover {
+  background: #ffffff;
+  border-color: #81c784;
+}
+
+.settings-toggle-all-btn:active {
+  transform: scale(0.96);
+  background: #eaf5e6;
+}
+
+.settings-card-header.collapsible {
+  cursor: pointer;
+  user-select: none;
+  justify-content: space-between;
+  transition: background 0.15s ease;
+}
+
+.settings-card-header.collapsible:hover {
+  background: #f1f7ef;
+}
+
+.settings-card-header.collapsible:active {
+  background: #e8f2e5;
+}
+
+.settings-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-card-header-right {
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.settings-header-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #c8e6c9;
+  margin-left: 6px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  max-width: 150px;
+}
+
+.settings-chevron {
+  color: #55705b;
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.settings-chevron.open {
+  transform: rotate(180deg);
+}
+
+.settings-card-content {
+  animation: settingsExpand 0.2s ease-out;
+}
+
+@keyframes settingsExpand {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .settings-item {
   padding: 12px 14px;
   display: flex;

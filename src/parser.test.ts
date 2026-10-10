@@ -228,3 +228,40 @@ describe("scanMessage", () => {
   });
 });
 
+describe("自訂 QR Code 識別標頭與規則設定 (QrParseOptions)", () => {
+  it("支援自訂電號貼紙標頭 (如 CUST:)", () => {
+    const options = { serviceQrHeader: "CUST:" };
+    expect(isServiceQrText("CUST:40701139", options)).toBe(true);
+    expect(parseServiceQrText("CUST:40701139", options)?.serviceNumber).toBe("40701139");
+    // 預設 MS: 在此 options 下不再視為電號
+    expect(isServiceQrText("MS:40701139", options)).toBe(false);
+  });
+
+  it("支援多組自訂電號貼紙標頭 (逗號分隔，如 MS:, NO:, SN:)", () => {
+    const options = { serviceQrHeader: "MS:, NO:, SN:" };
+    expect(isServiceQrText("NO:88990011", options)).toBe(true);
+    expect(parseServiceQrText("NO:88990011", options)?.serviceNumber).toBe("88990011");
+    expect(parseServiceQrText("SN:40701139", options)?.serviceNumber).toBe("40701139");
+    expect(parseServiceQrText("MS:56965402", options)?.serviceNumber).toBe("56965402");
+  });
+
+  it("支援自訂檢定合格標頭 (如 BSMI, INSP)", () => {
+    const options = { inspectionQrHeaders: "BSMI, INSP" };
+    const parsed = parseQrText("BSMI14A37241; 24094034; 114/06; GT-100", options);
+    expect(parsed?.partialRecord.inspectionNumber).toBe("14A37241");
+    expect(parsed?.meterNumber).toBe("24094034");
+    expect(parsed?.partialRecord.model).toBe("GT");
+  });
+
+  it("支援自訂表號碼數範圍 (如 6 碼或 12 碼)", () => {
+    const options6 = { meterMinDigits: 6, meterMaxDigits: 6 };
+    const parsed6 = parseQrText("LOLH14A37241; 998877; 114/06", options6);
+    expect(parsed6?.meterNumber).toBe("998877");
+
+    const options12 = { meterMinDigits: 11, meterMaxDigits: 14 };
+    const parsed12 = parseQrText("LOLH14A37241; 123456789012; 114/06", options12);
+    expect(parsed12?.meterNumber).toBe("123456789012");
+  });
+});
+
+

@@ -25,6 +25,18 @@ export type StoredAppData = {
   lastQrText: string;
   defaultExpiryDate: string;
   modelExpiryMap: Record<string, string>;
+  // 自訂 QR Code 識別標頭與規則
+  serviceQrHeader: string; // 電號貼紙前綴標頭，預設 "MS:"
+  inspectionQrHeaders: string; // 檢定號碼識別標頭，預設 "LOLH, L0LH"
+  meterMinDigits: number; // 表號最小位數，預設 7
+  meterMaxDigits: number; // 表號最大位數，預設 10
+};
+
+export type QrParseOptions = {
+  serviceQrHeader?: string;
+  inspectionQrHeaders?: string;
+  meterMinDigits?: number;
+  meterMaxDigits?: number;
 };
 
 export type Status = "idle" | "scanning" | "done" | "duplicate" | "error";

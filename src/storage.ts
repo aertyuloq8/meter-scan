@@ -25,6 +25,10 @@ const defaultData: StoredAppData = {
   lastQrText: "",
   defaultExpiryDate: "",
   modelExpiryMap: {},
+  serviceQrHeader: "MS:",
+  inspectionQrHeaders: "LOLH, L0LH",
+  meterMinDigits: 7,
+  meterMaxDigits: 10,
 };
 
 let cachedInMemoryData: StoredAppData | null = null;
@@ -211,6 +215,26 @@ export function sanitizeData(raw: unknown): StoredAppData {
     lastQrText: String(candidate.lastQrText ?? ""),
     defaultExpiryDate: String(candidate.defaultExpiryDate ?? ""),
     modelExpiryMap,
+    serviceQrHeader:
+      typeof candidate.serviceQrHeader === "string" && candidate.serviceQrHeader.trim()
+        ? candidate.serviceQrHeader.trim()
+        : "MS:",
+    inspectionQrHeaders:
+      typeof candidate.inspectionQrHeaders === "string" && candidate.inspectionQrHeaders.trim()
+        ? candidate.inspectionQrHeaders.trim()
+        : "LOLH, L0LH",
+    meterMinDigits:
+      typeof candidate.meterMinDigits === "number" &&
+      candidate.meterMinDigits >= 4 &&
+      candidate.meterMinDigits <= 15
+        ? candidate.meterMinDigits
+        : 7,
+    meterMaxDigits:
+      typeof candidate.meterMaxDigits === "number" &&
+      candidate.meterMaxDigits >= (candidate.meterMinDigits ?? 7) &&
+      candidate.meterMaxDigits <= 20
+        ? candidate.meterMaxDigits
+        : 10,
   };
 }
 

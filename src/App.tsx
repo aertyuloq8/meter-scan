@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Camera,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   ClipboardPlus,
   Cloud,
@@ -20,6 +21,7 @@ import {
   Maximize2,
   Minimize2,
   Plus,
+  QrCode,
   RefreshCw,
   Search,
   Settings,
@@ -89,7 +91,14 @@ import {
   ScanDebug,
   type SheetEditableField,
 } from "./components";
-import type { MeterRecord, RecordEditDraft, Status, StoredAppData, StoredFolder } from "./types";
+import type {
+  MeterRecord,
+  QrParseOptions,
+  RecordEditDraft,
+  Status,
+  StoredAppData,
+  StoredFolder,
+} from "./types";
 import { APP_VERSION } from "./version";
 
 type HandleQrOptions = {
@@ -124,6 +133,69 @@ export type CameraWindowSize = "large" | "xlarge" | "compact";
 
 export function App() {
   const [data, setData] = useState<StoredAppData>(() => loadData());
+
+  const qrParseOptions = useMemo<QrParseOptions>(
+    () => ({
+      serviceQrHeader: data.serviceQrHeader,
+      inspectionQrHeaders: data.inspectionQrHeaders,
+      meterMinDigits: data.meterMinDigits,
+      meterMaxDigits: data.meterMaxDigits,
+    }),
+    [data.serviceQrHeader, data.inspectionQrHeaders, data.meterMinDigits, data.meterMaxDigits],
+  );
+
+  const [expandedSettingsCards, setExpandedSettingsCards] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem("settings_expanded_cards");
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {
+      // 略過
+    }
+    return {
+      export: true,
+      backup: false,
+      scan: false,
+      rules: false,
+      qrRules: false,
+      expiry: false,
+      system: false,
+      debug: false,
+    };
+  });
+
+  function toggleSettingsCard(cardKey: string) {
+    setExpandedSettingsCards((prev) => {
+      const next = { ...prev, [cardKey]: !prev[cardKey] };
+      try {
+        localStorage.setItem("settings_expanded_cards", JSON.stringify(next));
+      } catch {
+        // 略過
+      }
+      return next;
+    });
+  }
+
+  function setAllSettingsCards(open: boolean) {
+    const next = {
+      export: open,
+      backup: open,
+      scan: open,
+      rules: open,
+      qrRules: open,
+      expiry: open,
+      system: open,
+      debug: open,
+    };
+    setExpandedSettingsCards(next);
+    try {
+      localStorage.setItem("settings_expanded_cards", JSON.stringify(next));
+    } catch {
+      // 略過
+    }
+  }
+
   const [cameraWindowSize, setCameraWindowSize] = useState<CameraWindowSize>(() => {
     try {
       const saved = localStorage.getItem("camera_window_size");
@@ -343,8 +415,8 @@ export function App() {
   const selectedCount = selectedIndexes.length;
   const lastParsedQr = useMemo(() => {
     const texts = data.lastQrText.split(/\r?\n/).filter(Boolean);
-    return parseQrText(chooseBestQrText(texts));
-  }, [data.lastQrText]);
+    return parseQrText(chooseBestQrText(texts, qrParseOptions), qrParseOptions);
+  }, [data.lastQrText, qrParseOptions]);
 
   // 關鍵：掃描 bursts 間隔極短，React 的 function-updater 是非同步執行的，
   // 不能在 setData 後立刻讀結果（時而拿到、時而拿不到，造成提示消失、抽屜不彈）。
@@ -989,8 +1061,8 @@ export function App() {
 
     // MS 電號貼紙靠 MS: 前綴自動分流：同框有電表 QR 時先處理電表，
     // MS 留到下一幀再讀（屆時用鎖定或等貼紙狀態歸屬；都沒有就回請先掃描）
-    const serviceTexts = candidateTexts.filter((text) => isServiceQrText(text));
-    const meterTexts = candidateTexts.filter((text) => !isServiceQrText(text));
+    const serviceTexts = candidateTexts.filter((text) => isServiceQrText(text, qrParseOptions));
+    const meterTexts = candidateTexts.filter((text) => !isServiceQrText(text, qrParseOptions));
 
     // 0. 先檢驗當前鎖定表號：若該表已在資料庫中結案（已配對完成且已有電號），立即自動解鎖！
     const currentFolder = dataRef.current.folders[activeDateRef.current] ?? { records: [], seenQrTexts: [] };
@@ -998,7 +1070,7 @@ export function App() {
       const lockedRec = currentFolder.records.find((r) => r.meterNumber === nativeTargetMeterRef.current);
       if (
         lockedRec &&
-        isMeterPairComplete(lockedRec, currentFolder.seenQrTexts) &&
+        isMeterPairComplete(lockedRec, currentFolder.seenQrTexts, qrParseOptions) &&
         Boolean((lockedRec.serviceNumber ?? "").replace(/\D/g, ""))
       ) {
         nativeTargetMeterRef.current = null;
@@ -1010,7 +1082,7 @@ export function App() {
     if (!meterTexts.length) {
       for (const serviceText of serviceTexts) {
         nativeSessionTextsRef.current.add(serviceText);
-        const parsedService = parseServiceQrText(serviceText);
+        const parsedService = parseServiceQrText(serviceText, qrParseOptions);
         if (!parsedService) {
           setStatus("error");
           setMessage("電號貼紙格式不正確");
@@ -1029,7 +1101,7 @@ export function App() {
       // 若當前畫面「只有」已完成的表，沒有任何新電表的 QR，才提示移動至下一台
       const hasAnyNew = meterTexts.some((text) => !completedOldTexts.includes(text));
       if (!hasAnyNew) {
-        const completedMeter = parseQrText(completedOldTexts[0])?.meterNumber || "";
+        const completedMeter = parseQrText(completedOldTexts[0], qrParseOptions)?.meterNumber || "";
         if (
           justSavedMeterRef.current &&
           justSavedMeterRef.current.meter === completedMeter &&
@@ -1062,7 +1134,7 @@ export function App() {
     // 若當前電表正在等待掃描電號貼紙 (pendingCompletionRef)，絕對禁止自動切換或被新電表取代！
     // 只有在當前「未鎖定任何電表」且「未在等待貼紙」；或者「當前鎖定的電表已完整結案（配對完成且已有電號）」時，才允許自動鎖定新電表！
     const detectedNewMeter =
-      newMeterCandidates.map((text) => parseQrText(text)?.meterNumber || "").find(Boolean) || null;
+      newMeterCandidates.map((text) => parseQrText(text, qrParseOptions)?.meterNumber || "").find(Boolean) || null;
     if (detectedNewMeter) {
       const currentLocked = nativeTargetMeterRef.current;
       if (!currentLocked) {
@@ -1074,7 +1146,7 @@ export function App() {
         // 當前已鎖定某電表：只有該電表「已配對完成且已有電號（已完整存檔結案）」才允許自動移至新電表
         const lockedRec = currentFolder.records.find((r) => r.meterNumber === currentLocked);
         const isCurrentFinished = lockedRec
-          ? isMeterPairComplete(lockedRec, currentFolder.seenQrTexts) &&
+          ? isMeterPairComplete(lockedRec, currentFolder.seenQrTexts, qrParseOptions) &&
             Boolean((lockedRec.serviceNumber ?? "").replace(/\D/g, ""))
           : false;
 
@@ -1413,10 +1485,10 @@ export function App() {
     }
 
     // MS 電號貼紙靠 MS: 前綴自動分流，不進電表合併、不計入 1/2 配對、不進 seenQrTexts
-    const serviceRawTexts = readableTexts.filter((text) => isServiceQrText(text));
-    const meterRawTexts = readableTexts.filter((text) => !isServiceQrText(text));
+    const serviceRawTexts = readableTexts.filter((text) => isServiceQrText(text, qrParseOptions));
+    const meterRawTexts = readableTexts.filter((text) => !isServiceQrText(text, qrParseOptions));
     const batchMeters = [...new Set(
-      meterRawTexts.map((text) => parseQrText(text)?.meterNumber || "").filter(Boolean),
+      meterRawTexts.map((text) => parseQrText(text, qrParseOptions)?.meterNumber || "").filter(Boolean),
     )];
     const hintFolder = dataRef.current.folders[activeDateRef.current] ?? { records: [], seenQrTexts: [] };
     const batchMeterHint = selectBatchMeterHint(batchMeters, hintFolder.records, hintFolder.seenQrTexts);
@@ -1428,7 +1500,7 @@ export function App() {
 
     function runServiceTexts() {
       for (const serviceText of serviceRawTexts) {
-        const parsedService = parseServiceQrText(serviceText);
+        const parsedService = parseServiceQrText(serviceText, qrParseOptions);
         if (!parsedService) {
           updateData((current) => ({ ...current, lastQrText: normalizeQrText(serviceText) }));
           setStatus("error");
@@ -1455,7 +1527,7 @@ export function App() {
     // 連續掃描中：若正處於等待貼紙 (pendingCompletionRef)，只允許當前待貼紙電表，避免被誤掃的新電表沖掉
     if (options.continuous && pendingCompletionRef.current) {
       const nonMatching = meterRawTexts.filter((text) => {
-        const m = parseQrText(text)?.meterNumber;
+        const m = parseQrText(text, qrParseOptions)?.meterNumber;
         return m && m !== pendingCompletionRef.current;
       });
       if (nonMatching.length > 0 && nonMatching.length === meterRawTexts.length) {
@@ -1471,12 +1543,12 @@ export function App() {
       const curFolder = dataRef.current.folders[activeDateRef.current] ?? { records: [], seenQrTexts: [] };
       const currentRec = curFolder.records.find((r) => r.meterNumber === targetMeterLiveRef.current);
       const isCurrentFinished = currentRec
-        ? isMeterPairComplete(currentRec, curFolder.seenQrTexts) &&
+        ? isMeterPairComplete(currentRec, curFolder.seenQrTexts, qrParseOptions) &&
           Boolean((currentRec.serviceNumber ?? "").replace(/\D/g, ""))
         : false;
       if (!isCurrentFinished) {
         const nonMatching = meterRawTexts.filter((text) => {
-          const m = parseQrText(text)?.meterNumber;
+          const m = parseQrText(text, qrParseOptions)?.meterNumber;
           return m && m !== targetMeterLiveRef.current;
         });
         if (nonMatching.length > 0 && nonMatching.length === meterRawTexts.length) {
@@ -1488,16 +1560,16 @@ export function App() {
       }
     }
 
-    const bestText = chooseBestQrText(meterRawTexts);
-    const parsed = parseQrText(bestText);
-    const cleanedText = meterRawTexts.map((text) => parseQrText(text)?.rawText || text.trim()).join("\n");
+    const bestText = chooseBestQrText(meterRawTexts, qrParseOptions);
+    const parsed = parseQrText(bestText, qrParseOptions);
+    const cleanedText = meterRawTexts.map((text) => parseQrText(text, qrParseOptions)?.rawText || text.trim()).join("\n");
 
     // dataRef 經 write-through 永遠是最新（見 updateData），連續掃描 bursts 直接用它算，
     // 不會蓋掉前一包、不會生出同表號兩筆。
     const currentData = dataRef.current;
     const date = activeDateRef.current;
     const folder = currentData.folders[date] ?? { records: [], seenQrTexts: [] };
-    const mergeResult = mergeQrTexts(folder.records, folder.seenQrTexts, meterRawTexts);
+    const mergeResult = mergeQrTexts(folder.records, folder.seenQrTexts, meterRawTexts, qrParseOptions);
 
     if (mergeResult.added || mergeResult.updated) {
       // 掃描紀錄保持電號空白（前綴只在輸入對話框預填），避免「前綴半成品」被視為已填寫並匯出；
@@ -2544,6 +2616,32 @@ export function App() {
     window.location.reload();
   }
 
+  function setServiceQrHeader(serviceQrHeader: string) {
+    updateData((current) => ({ ...current, serviceQrHeader }));
+  }
+
+  function setInspectionQrHeaders(inspectionQrHeaders: string) {
+    updateData((current) => ({ ...current, inspectionQrHeaders }));
+  }
+
+  function setMeterDigitsRange(min: number, max: number) {
+    const meterMinDigits = Math.min(min, max);
+    const meterMaxDigits = Math.max(min, max);
+    updateData((current) => ({ ...current, meterMinDigits, meterMaxDigits }));
+  }
+
+  function resetQrHeaderSettings() {
+    updateData((current) => ({
+      ...current,
+      serviceQrHeader: "MS:",
+      inspectionQrHeaders: "LOLH, L0LH",
+      meterMinDigits: 7,
+      meterMaxDigits: 10,
+    }));
+    setStatus("done");
+    setMessage("已恢復 QR 辨識標頭與碼數預設值");
+  }
+
   function setEditPrefixEnabled(enabled: boolean) {
     setEditDraft((current) => {
       if (!current) {
@@ -3300,18 +3398,56 @@ export function App() {
                 <h1 className="header-title">匯出與偏好設定</h1>
               </div>
               <div className="header-right">
+                <div className="settings-accordion-toggle-group">
+                  <button
+                    type="button"
+                    className="settings-toggle-all-btn"
+                    onClick={() => setAllSettingsCards(true)}
+                    title="展開全部設定卡片"
+                  >
+                    全部展開
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-toggle-all-btn"
+                    onClick={() => setAllSettingsCards(false)}
+                    title="收合全部設定卡片"
+                  >
+                    全部收合
+                  </button>
+                </div>
                 <span className="date-pill">{today()}</span>
               </div>
             </header>
 
             {/* 卡片 1: 資料匯出 */}
             <div className="settings-card">
-              <div className="settings-card-header">
-                <Download size={16} />
-                <span>報表資料匯出 (Excel)</span>
+              <div
+                className="settings-card-header collapsible"
+                onClick={() => toggleSettingsCard("export")}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="settings-card-header-left">
+                  <Download size={16} />
+                  <span>報表資料匯出 (Excel)</span>
+                  {!expandedSettingsCards.export && (
+                    <span className="settings-header-pill">
+                      今日 {data.folders[today()]?.records.length ?? 0} 筆
+                    </span>
+                  )}
+                </div>
+                <div className="settings-card-header-right">
+                  <ChevronDown
+                    size={18}
+                    className={`settings-chevron ${expandedSettingsCards.export ? "open" : ""}`}
+                  />
+                </div>
               </div>
 
-              <div className="settings-tip-banner">
+              {expandedSettingsCards.export && (
+                <div className="settings-card-content">
+                  <div className="settings-tip-banner">
                 <Share2 size={16} />
                 <span>手機提示：點擊匯出後選擇「分享」，即可直接儲存至「Google 雲端硬碟」或傳送至 LINE！</span>
               </div>
@@ -3429,13 +3565,34 @@ export function App() {
                 </div>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* 卡片 2: 資料備份與還原 (參考 webpro 架構) */}
-            <div className="settings-card">
-              <div className="settings-card-header">
+          {/* 卡片 2: 資料備份與還原 */}
+          <div className="settings-card">
+            <div
+              className="settings-card-header collapsible"
+              onClick={() => toggleSettingsCard("backup")}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="settings-card-header-left">
                 <Database size={16} />
                 <span>資料備份與還原</span>
+                {!expandedSettingsCards.backup && (
+                  <span className="settings-header-pill">Google 雲端 · 本地備份</span>
+                )}
               </div>
+              <div className="settings-card-header-right">
+                <ChevronDown
+                  size={18}
+                  className={`settings-chevron ${expandedSettingsCards.backup ? "open" : ""}`}
+                />
+              </div>
+            </div>
+
+            {expandedSettingsCards.backup && (
+              <div className="settings-card-content">
 
               {/* 雲端 Drive 專區 */}
               <div
@@ -3529,13 +3686,36 @@ export function App() {
                 </div>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* 卡片 3: 掃描偏好設定 */}
-            <div className="settings-card">
-              <div className="settings-card-header">
+          {/* 卡片 3: 掃描偏好設定 */}
+          <div className="settings-card">
+            <div
+              className="settings-card-header collapsible"
+              onClick={() => toggleSettingsCard("scan")}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="settings-card-header-left">
                 <SlidersHorizontal size={16} />
                 <span>掃描偏好設定</span>
+                {!expandedSettingsCards.scan && (
+                  <span className="settings-header-pill">
+                    {data.scanIntervalMs / 1000}s · {data.keypadMode === "large" ? "大鍵盤" : "系統鍵盤"}
+                  </span>
+                )}
               </div>
+              <div className="settings-card-header-right">
+                <ChevronDown
+                  size={18}
+                  className={`settings-chevron ${expandedSettingsCards.scan ? "open" : ""}`}
+                />
+              </div>
+            </div>
+
+            {expandedSettingsCards.scan && (
+              <div className="settings-card-content">
 
               <div className="settings-item">
                 <div className="settings-item-info">
@@ -3596,13 +3776,36 @@ export function App() {
                 </div>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* 卡片 4: 電號規則 */}
-            <div className="settings-card">
-              <div className="settings-card-header">
+          {/* 卡片 4: 電號規則 */}
+          <div className="settings-card">
+            <div
+              className="settings-card-header collapsible"
+              onClick={() => toggleSettingsCard("rules")}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="settings-card-header-left">
                 <FileText size={16} />
                 <span>電號規則</span>
+                {!expandedSettingsCards.rules && (
+                  <span className="settings-header-pill">
+                    {data.servicePrefixEnabled ? `前綴 ${data.servicePrefix}` : "未啟用前綴"} · 區號 {data.districtCode}
+                  </span>
+                )}
               </div>
+              <div className="settings-card-header-right">
+                <ChevronDown
+                  size={18}
+                  className={`settings-chevron ${expandedSettingsCards.rules ? "open" : ""}`}
+                />
+              </div>
+            </div>
+
+            {expandedSettingsCards.rules && (
+              <div className="settings-card-content">
               <div className="settings-item">
                 <div className="settings-item-info">
                   <span className="settings-item-title">啟用電號前綴預填</span>
@@ -3680,13 +3883,194 @@ export function App() {
                 </div>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* 卡片 5: 型式檢定期限記憶 */}
-            <div className="settings-card">
-              <div className="settings-card-header">
+          {/* 卡片 5: QR Code 辨識標頭與規則 (全新自訂功能) */}
+          <div className="settings-card">
+            <div
+              className="settings-card-header collapsible"
+              onClick={() => toggleSettingsCard("qrRules")}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="settings-card-header-left">
+                <QrCode size={16} />
+                <span>QR Code 辨識標頭與規則</span>
+                {!expandedSettingsCards.qrRules && (
+                  <span className="settings-header-pill">
+                    標頭 {data.serviceQrHeader} · {data.inspectionQrHeaders.split(",")[0].trim()}
+                  </span>
+                )}
+              </div>
+              <div className="settings-card-header-right">
+                <ChevronDown
+                  size={18}
+                  className={`settings-chevron ${expandedSettingsCards.qrRules ? "open" : ""}`}
+                />
+              </div>
+            </div>
+
+            {expandedSettingsCards.qrRules && (
+              <div className="settings-card-content">
+                <div
+                  className="settings-tip-banner"
+                  style={{ background: "#f0fdf4", borderColor: "#bbf7d0", color: "#166534" }}
+                >
+                  <Info size={16} />
+                  <span>
+                    <strong>自動分流與標頭辨識說明：</strong>
+                    系統掃瞄時會自動分析內容。電號貼紙與檢定合格貼紙的前綴代碼可在此彈性自訂，未來若標頭更換，直接修改即可即時生效，無需改寫程式！
+                  </span>
+                </div>
+
+                {/* 項目 1: 電號貼紙標頭 */}
+                <div className="settings-item">
+                  <div className="settings-item-info">
+                    <span className="settings-item-title">電號貼紙識別標頭</span>
+                    <span className="settings-item-desc">
+                      預設 <code>MS:</code>。掃到以此字首開頭的 QR 碼時自動判為電號貼紙並擷取後方電號（例如 <code>MS:40701139</code>）。支援逗號分隔多組（例如 <code>MS:, NO:, CUST:</code>）。
+                    </span>
+                  </div>
+                  <div className="settings-item-action">
+                    <div className="input-with-clear-wrap">
+                      <input
+                        type="text"
+                        placeholder="例如 MS:"
+                        style={{ width: "120px", textAlign: "center", fontWeight: "bold" }}
+                        value={data.serviceQrHeader}
+                        onChange={(e) => setServiceQrHeader(e.target.value)}
+                      />
+                      {data.serviceQrHeader ? (
+                        <button
+                          type="button"
+                          className="input-inline-clear-btn"
+                          title="清空"
+                          onClick={() => setServiceQrHeader("")}
+                        >
+                          <X size={14} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 項目 2: 檢定號碼識別標頭 */}
+                <div className="settings-item">
+                  <div className="settings-item-info">
+                    <span className="settings-item-title">檢定號碼前綴標頭</span>
+                    <span className="settings-item-desc">
+                      預設 <code>LOLH, L0LH</code>。檢定合格貼紙 QR 碼常以此字首開頭（如 <code>L0LH14A37241;...</code>），系統會自動去除此前綴擷取合格號碼。支援逗號分隔多組。
+                    </span>
+                  </div>
+                  <div className="settings-item-action">
+                    <div className="input-with-clear-wrap">
+                      <input
+                        type="text"
+                        placeholder="例如 LOLH, L0LH"
+                        style={{ width: "140px", textAlign: "center", fontWeight: "bold" }}
+                        value={data.inspectionQrHeaders}
+                        onChange={(e) => setInspectionQrHeaders(e.target.value)}
+                      />
+                      {data.inspectionQrHeaders ? (
+                        <button
+                          type="button"
+                          className="input-inline-clear-btn"
+                          title="清空"
+                          onClick={() => setInspectionQrHeaders("")}
+                        >
+                          <X size={14} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 項目 3: 表號純數字碼數範圍 */}
+                <div className="settings-item">
+                  <div className="settings-item-info">
+                    <span className="settings-item-title">表號連續數字長度限制</span>
+                    <span className="settings-item-desc">
+                      預設 7 ～ 10 碼。系統會在電表銘版與貼紙的各項資料中，自動篩選此長度的純數字作為電表號碼。
+                    </span>
+                  </div>
+                  <div className="settings-item-action" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <select
+                      value={data.meterMinDigits}
+                      onChange={(e) => setMeterDigitsRange(Number(e.target.value), data.meterMaxDigits)}
+                      style={{ width: "68px", textAlign: "center", fontWeight: "bold" }}
+                    >
+                      {[5, 6, 7, 8].map((n) => (
+                        <option key={n} value={n}>{n} 碼</option>
+                      ))}
+                    </select>
+                    <span style={{ fontSize: "12px", color: "#666" }}>至</span>
+                    <select
+                      value={data.meterMaxDigits}
+                      onChange={(e) => setMeterDigitsRange(data.meterMinDigits, Number(e.target.value))}
+                      style={{ width: "68px", textAlign: "center", fontWeight: "bold" }}
+                    >
+                      {[8, 9, 10, 11, 12, 14].map((n) => (
+                        <option key={n} value={n}>{n} 碼</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 項目 4: 型式與製造日期自動判斷說明 */}
+                <div className="settings-item" style={{ background: "#fafbfc" }}>
+                  <div className="settings-item-info" style={{ width: "100%" }}>
+                    <span className="settings-item-title" style={{ color: "#374151" }}>型式與製造日期識別原理（免手動設定）</span>
+                    <div style={{ fontSize: "12px", color: "#4b5563", marginTop: "4px", lineHeight: "1.6" }}>
+                      <div>• <strong>型式 (Model)</strong>：自動辨識含破折號之規格代碼（如 <code>GT-100</code>、<code>RT-120</code>、<code>SC20-123</code>），自動擷取破折號前 2 碼英文（如 <code>GT</code>、<code>RT</code>、<code>SC</code>）。</div>
+                      <div>• <strong>製造日期 (Date)</strong>：自動辨識符合年/月格式之數字（如 <code>114/06</code> 或 <code>24/5</code>），自動記錄為製造年月。</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 項目 5: 重設預設值按鈕 */}
+                <div className="settings-item" style={{ justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    className="settings-action-btn"
+                    onClick={resetQrHeaderSettings}
+                    title="將所有 QR 識別標頭與碼數還原為預設值"
+                  >
+                    <RefreshCw size={13} />
+                    <span>恢復 QR 預設規則</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 卡片 6: 型式檢定期限記憶 */}
+          <div className="settings-card">
+            <div
+              className="settings-card-header collapsible"
+              onClick={() => toggleSettingsCard("expiry")}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="settings-card-header-left">
                 <FileText size={16} />
                 <span>型式檢定期限記憶 (同型式自動套用)</span>
+                {!expandedSettingsCards.expiry && (
+                  <span className="settings-header-pill">
+                    {data.defaultExpiryDate ? `預設 ${data.defaultExpiryDate}` : "未設預設"} · 已記憶 {Object.keys(data.modelExpiryMap).length} 型
+                  </span>
+                )}
               </div>
+              <div className="settings-card-header-right">
+                <ChevronDown
+                  size={18}
+                  className={`settings-chevron ${expandedSettingsCards.expiry ? "open" : ""}`}
+                />
+              </div>
+            </div>
+
+            {expandedSettingsCards.expiry && (
+              <div className="settings-card-content">
               <div className="settings-item">
                 <div className="settings-item-info">
                   <span className="settings-item-title">預設檢定期限</span>
@@ -3742,13 +4126,34 @@ export function App() {
                 </div>
               ) : null}
             </div>
+          )}
+        </div>
 
-            {/* 卡片 6: 系統儲存狀態 */}
-            <div className="settings-card">
-              <div className="settings-card-header">
-                <Info size={16} />
-                <span>系統與儲存狀態</span>
-              </div>
+        {/* 卡片 7: 系統與儲存狀態 */}
+        <div className="settings-card">
+          <div
+            className="settings-card-header collapsible"
+            onClick={() => toggleSettingsCard("system")}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="settings-card-header-left">
+              <Info size={16} />
+              <span>系統與儲存狀態</span>
+              {!expandedSettingsCards.system && (
+                <span className="settings-header-pill">v{APP_VERSION} · IndexedDB</span>
+              )}
+            </div>
+            <div className="settings-card-header-right">
+              <ChevronDown
+                size={18}
+                className={`settings-chevron ${expandedSettingsCards.system ? "open" : ""}`}
+              />
+            </div>
+          </div>
+
+          {expandedSettingsCards.system && (
+            <div className="settings-card-content">
               <div className="storage-stats-container">
                 <div className="storage-stat-box">
                   <span className="stat-box-label">本地儲存引擎</span>
@@ -3782,19 +4187,39 @@ export function App() {
                 </div>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* 卡片 7: 最後掃描 QR 原始資訊 */}
-            {data.lastQrText ? (
-              <div className="settings-card">
-                <div className="settings-card-header">
-                  <Sparkles size={16} />
-                  <span>最後掃描 QR 原始資訊 (除錯)</span>
-                </div>
-                <div style={{ padding: "10px 14px" }}>
-                  <ScanDebug lastQrText={data.lastQrText} parsed={lastParsedQr} />
-                </div>
+        {/* 卡片 8: 最後掃描 QR 原始資訊 */}
+        {data.lastQrText ? (
+          <div className="settings-card">
+            <div
+              className="settings-card-header collapsible"
+              onClick={() => toggleSettingsCard("debug")}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="settings-card-header-left">
+                <Sparkles size={16} />
+                <span>最後掃描 QR 原始資訊 (除錯)</span>
+                {!expandedSettingsCards.debug && (
+                  <span className="settings-header-pill">點擊展開資料</span>
+                )}
               </div>
-            ) : null}
+              <div className="settings-card-header-right">
+                <ChevronDown
+                  size={18}
+                  className={`settings-chevron ${expandedSettingsCards.debug ? "open" : ""}`}
+                />
+              </div>
+            </div>
+            {expandedSettingsCards.debug && (
+              <div className="settings-card-content" style={{ padding: "10px 14px" }}>
+                <ScanDebug lastQrText={data.lastQrText} parsed={lastParsedQr} />
+              </div>
+            )}
+          </div>
+        ) : null}
           </div>
         )}
 
