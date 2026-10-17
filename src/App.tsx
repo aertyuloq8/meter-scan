@@ -919,18 +919,7 @@ export function App() {
       setMessage(clean ? `已設定固定前綴：${clean}` : "已清空固定前綴");
     } else if (quickKeypadField === "expiryDate") {
       const formatted = quickKeypadDraft ? formatExpiryDate(quickKeypadDraft) : "";
-      updateData((current) => {
-        const date = activeDateRef.current;
-        const latestModel = current.folders[date]?.records[0]?.model || "";
-        const nextMap = { ...current.modelExpiryMap };
-        if (latestModel && formatted) {
-          nextMap[latestModel] = formatted;
-        }
-        for (const key of Object.keys(nextMap)) {
-          if (!nextMap[key]) delete nextMap[key];
-        }
-        return { ...current, defaultExpiryDate: formatted, modelExpiryMap: nextMap };
-      });
+      updateData((current) => ({ ...current, defaultExpiryDate: formatted }));
       setMessage(formatted ? `已設定預設檢定期限：${formatted}` : "已清除預設檢定期限");
     } else if (quickKeypadField === "districtCode") {
       const clean = quickKeypadDraft.replace(/\D/g, "").slice(0, 2);
@@ -1298,17 +1287,14 @@ export function App() {
     return Date.now() >= scanReadyAtRef.current;
   }
 
-  function resolveExpiryDate(model: string, currentData: StoredAppData): string {
-    if (model && currentData.modelExpiryMap[model]) {
-      return currentData.modelExpiryMap[model];
-    }
+  function resolveExpiryDate(currentData: StoredAppData): string {
     return currentData.defaultExpiryDate || "";
   }
 
   function openCompletionDraft(record: MeterRecord, targetIndex?: number) {
     const prefix = dataRef.current.servicePrefix;
     const prefixEnabled = dataRef.current.servicePrefixEnabled;
-    const expiry = record.expiryDate || resolveExpiryDate(record.model, dataRef.current);
+    const expiry = record.expiryDate || resolveExpiryDate(dataRef.current);
     setEditError("");
     setEditDraftLive({
       mode: "complete",
@@ -1583,12 +1569,12 @@ export function App() {
 
     if (mergeResult.added || mergeResult.updated) {
       // 掃描紀錄保持電號空白（前綴只在輸入對話框預填），避免「前綴半成品」被視為已填寫並匯出；
-      // 檢定期限則可安全自動套用（同型式記憶）。
+      // 檢定期限若有全域預設值則套用，否則保持空白（不依同型式記憶）。
       const recordsWithExpiry = mergeResult.records.map((record) => {
         if (record.expiryDate) {
           return record;
         }
-        const autoExpiry = resolveExpiryDate(record.model, currentData);
+        const autoExpiry = resolveExpiryDate(currentData);
         return autoExpiry ? { ...record, expiryDate: autoExpiry } : record;
       });
 
@@ -2669,8 +2655,7 @@ export function App() {
     });
   }
 
-  // 檢定期限快捷輸入：打字時只更新預設值（不碰型式記憶），離開欄位才正式提交。
-  // 避免輸入中間態（如 "1"、"12"）污染 modelExpiryMap。
+  // 檢定期限快捷輸入：打字時即時更新格式，離開欄位時正式格式化提交。
   function handleQuickExpiryDraft(val: string) {
     const formatted = formatExpiryDate(val);
     updateData((current) => ({ ...current, defaultExpiryDate: formatted }));
@@ -2679,23 +2664,11 @@ export function App() {
   function commitQuickExpiry() {
     updateData((current) => {
       const formatted = formatExpiryDate(current.defaultExpiryDate || "");
-      const date = activeDateRef.current;
-      const latestModel = current.folders[date]?.records[0]?.model || "";
-      const nextMap = { ...current.modelExpiryMap };
-      if (latestModel && formatted) {
-        nextMap[latestModel] = formatted;
-      }
-      for (const key of Object.keys(nextMap)) {
-        if (!nextMap[key]) {
-          delete nextMap[key];
-        }
-      }
-      return { ...current, defaultExpiryDate: formatted, modelExpiryMap: nextMap };
+      return { ...current, defaultExpiryDate: formatted };
     });
   }
 
   function clearQuickExpiry() {
-    // 只清預設值，不動已記憶的各型式期限
     updateData((current) => ({ ...current, defaultExpiryDate: "" }));
   }
 
@@ -2773,11 +2746,6 @@ export function App() {
           };
         }
 
-        // 同型式若未填寫檢定期限，一併自動套用！
-        if (expiryDate && draft.model && record.model === draft.model && !record.expiryDate) {
-          return { ...record, expiryDate };
-        }
-
         return record;
       });
 
@@ -2792,17 +2760,10 @@ export function App() {
     });
 
     updateData((current) => {
-      const nextMap = { ...current.modelExpiryMap };
-      if (draft.model && expiryDate) {
-        nextMap[draft.model] = expiryDate;
-      }
-      // 注意：不再把本次期限寫回 defaultExpiryDate，避免上批期限污染新批次新機型；
-      // 預設值只由設定頁／快捷列／掃描前確認等明確操作修改。
       return {
         ...current,
         servicePrefixEnabled: draft.prefixEnabled,
         servicePrefix: draft.prefix,
-        modelExpiryMap: nextMap,
       };
     });
 
@@ -3092,7 +3053,7 @@ export function App() {
                 <div className="quick-setting-row">
                   <div className="quick-label-cell">
                     <span className="pref-field-title">檢定期限</span>
-                    <span className="pref-field-sub">同型式套用 (免打/自動補)</span>
+                    <span className="pref-field-sub">預設期限 (免打/自動補)</span>
                   </div>
                   <div className="quick-input-cell">
                     <div className="input-with-clear-wrap">
@@ -4054,7 +4015,7 @@ export function App() {
             )}
           </div>
 
-          {/* 卡片 6: 型式檢定期限記憶 */}
+          {/* 卡片 6: 預設檢定期限 */}
           <div className="settings-card">
             <div
               className="settings-card-header collapsible"
@@ -4064,10 +4025,10 @@ export function App() {
             >
               <div className="settings-card-header-left">
                 <FileText size={16} />
-                <span>型式檢定期限記憶 (同型式自動套用)</span>
+                <span>預設檢定期限</span>
                 {!expandedSettingsCards.expiry && (
                   <span className="settings-header-pill">
-                    {data.defaultExpiryDate ? `預設 ${data.defaultExpiryDate}` : "未設預設"} · 已記憶 {Object.keys(data.modelExpiryMap).length} 型
+                    {data.defaultExpiryDate ? `預設 ${data.defaultExpiryDate}` : "未設定"}
                   </span>
                 )}
               </div>
@@ -4081,63 +4042,39 @@ export function App() {
 
             {expandedSettingsCards.expiry && (
               <div className="settings-card-content">
-              <div className="settings-item">
-                <div className="settings-item-info">
-                  <span className="settings-item-title">預設檢定期限</span>
-                  <span className="settings-item-desc">未特定型式時使用的通用檢定期限</span>
-                </div>
-                <div className="settings-item-action">
-                  <div className="input-with-clear-wrap">
-                    <input
-                      inputMode="numeric"
-                      placeholder="例如 125/12"
-                      style={{ width: "100px", textAlign: "center", fontWeight: "bold" }}
-                      value={data.defaultExpiryDate}
-                      onChange={(e) => handleQuickExpiryDraft(e.target.value)}
-                      onBlur={commitQuickExpiry}
-                    />
-                    {data.defaultExpiryDate ? (
-                      <button
-                        type="button"
-                        className="input-inline-clear-btn"
-                        title="清空"
-                        onClick={() => clearQuickExpiry()}
-                      >
-                        <X size={14} />
-                      </button>
-                    ) : null}
+                <div className="settings-item">
+                  <div className="settings-item-info">
+                    <span className="settings-item-title">預設檢定期限</span>
+                    <span className="settings-item-desc">
+                      掃描或新增電表時預設填入的檢定期限（可留空，逐筆於抽屜手動輸入）
+                    </span>
+                  </div>
+                  <div className="settings-item-action">
+                    <div className="input-with-clear-wrap">
+                      <input
+                        inputMode="numeric"
+                        placeholder="例如 125/12"
+                        style={{ width: "100px", textAlign: "center", fontWeight: "bold" }}
+                        value={data.defaultExpiryDate}
+                        onChange={(e) => handleQuickExpiryDraft(e.target.value)}
+                        onBlur={commitQuickExpiry}
+                      />
+                      {data.defaultExpiryDate ? (
+                        <button
+                          type="button"
+                          className="input-inline-clear-btn"
+                          title="清空"
+                          onClick={() => clearQuickExpiry()}
+                        >
+                          <X size={14} />
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               </div>
-              {Object.keys(data.modelExpiryMap).length > 0 ? (
-                <div className="model-expiry-list">
-                  <div className="model-expiry-header">已記憶型式期限：</div>
-                  <div className="model-expiry-tags">
-                    {Object.entries(data.modelExpiryMap).map(([model, expiry]) => (
-                      <span key={model} className="model-expiry-badge">
-                        <strong>{model}</strong>: {expiry}
-                        <button
-                          type="button"
-                          className="badge-remove-btn"
-                          title="清除此型式記憶"
-                          onClick={() => {
-                            updateData((current) => {
-                              const nextMap = { ...current.modelExpiryMap };
-                              delete nextMap[model];
-                              return { ...current, modelExpiryMap: nextMap };
-                            });
-                          }}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
 
         {/* 卡片 7: 系統與儲存狀態 */}
         <div className="settings-card">
@@ -4416,7 +4353,7 @@ export function App() {
                       </div>
                     ) : (
                       <div className="pre-scan-hint">
-                        💡 提示：免輸入斜線「/」，連打數字（如 12512 系統自動轉為 125/12）。同型式電表將自動套用；無特定期限可保持空白。
+                        💡 提示：免輸入斜線「/」，連打數字（如 12512 系統自動轉為 125/12）。若未輸入可保持空白，後續亦可手動輸入。
                       </div>
                     )}
                   </div>
@@ -4445,7 +4382,7 @@ export function App() {
                       </div>
                     </div>
                     <div className="pre-scan-hint">
-                      💡 提示：免輸入斜線「/」，連打數字（如 12512 系統自動轉為 125/12）。同型式電表將自動套用；無特定期限可保持空白。
+                      💡 提示：免輸入斜線「/」，連打數字（如 12512 系統自動轉為 125/12）。若未輸入可保持空白，後續亦可手動輸入。
                     </div>
                   </div>
                 )}
@@ -4563,7 +4500,7 @@ export function App() {
                 {quickKeypadField === "prefix"
                   ? "配對電表後若續掃電號貼紙或手動輸入，將自動預填此前綴（例如 40 或 10，最多 6 碼）。"
                   : quickKeypadField === "expiryDate"
-                  ? "💡 提示：可免輸入斜線「/」，直接連打數字（例如 12512），系統會自動補 / 為 125/12。同型式電表將自動套用此期限。"
+                  ? "💡 提示：可免輸入斜線「/」，直接連打數字（例如 12512），系統會自動補 / 為 125/12。可設定為掃描時預設填入的期限。"
                   : "Excel 匯出時自動在 8 碼電號前補此 2 碼並計算第 11 碼檢查號。"}
               </div>
 

@@ -660,7 +660,7 @@ export function RecordEditSheet(props: {
           <div className="expiry-strip-status">
             {expiryDate ? (
               <div className="expiry-status-row">
-                <span className="expiry-ok">同型式已套用 ✓</span>
+                <span className="expiry-ok">已填寫 ✓</span>
                 <button
                   type="button"
                   className="strip-clear-btn"
@@ -675,7 +675,7 @@ export function RecordEditSheet(props: {
                 </button>
               </div>
             ) : (
-              <span className="expiry-warn">首次需輸入 (同型式記憶)</span>
+              <span className="expiry-warn">未填寫 (可空白)</span>
             )}
           </div>
         </div>
